@@ -49,6 +49,7 @@ export class WhatsappService implements OnModuleInit {
         clientId: 'car-scraper-bot',
       }),
       puppeteer: {
+        executablePath: '/app/.chrome-for-testing/chrome-linux64/chrome',
         headless: true,
         timeout: 60000,
         args: [
