@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
+
 import chromium from 'chrome-aws-lambda';
 
 import * as cheerio from 'cheerio';
