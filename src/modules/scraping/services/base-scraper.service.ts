@@ -11,12 +11,11 @@ export abstract class BaseScraperService {
 
   protected async initBrowser(): Promise<void> {
     if (!this.browser) {
-      const executablePath =
-        process.env.CHROME_EXECUTABLE_PATH || (await chromium.executablePath);
+      const executablePath = await chromium.executablePath;
 
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath: executablePath || undefined,
+        executablePath: executablePath || undefined, // если null → puppeteer-core возьмёт встроенный путь
         args: [
           ...chromium.args,
           '--no-sandbox',
@@ -32,29 +31,6 @@ export abstract class BaseScraperService {
         ],
       });
     }
-  }
-
-  private getChromePath(): string | undefined {
-    // Try to use system Chrome first, then fall back to Puppeteer's Chrome
-    const possiblePaths = [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
-      '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
-      '/usr/bin/google-chrome', // Linux
-      '/usr/bin/chromium-browser', // Linux Chromium
-      process.env.CHROME_PATH, // Custom path from environment
-    ];
-
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('fs');
-    for (const path of possiblePaths) {
-      if (path && fs.existsSync(path)) {
-        this.logger.debug(`Using Chrome at: ${path}`);
-        return path;
-      }
-    }
-
-    this.logger.debug('Using Puppeteer bundled Chrome');
-    return undefined; // Let Puppeteer use its bundled Chrome
   }
 
   protected async createPage(): Promise<Page> {
