@@ -38,8 +38,6 @@ export class WhatsappService implements OnModuleInit {
       );
       return;
     }
-
-    // Delay WhatsApp initialization to avoid conflicts with other services
     setTimeout(() => {
       this.startClient();
     }, 2000);
@@ -53,7 +51,7 @@ export class WhatsappService implements OnModuleInit {
       }),
       puppeteer: {
         headless: true,
-        timeout: 60000, // Increase timeout
+        timeout: 60000,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
