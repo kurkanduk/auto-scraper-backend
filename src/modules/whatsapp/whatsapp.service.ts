@@ -43,8 +43,12 @@ export class WhatsappService implements OnModuleInit {
     }, 2000);
   }
 
-  private initializeClient() {
-    const executablePath = process.env.CHROME_BIN || undefined;
+  private async initializeClient() {
+    const executablePath =
+      process.env.NODE_ENV === 'production'
+        ? await chromium.executablePath // use chrome-aws-lambda on Heroku
+        : undefined; // let Puppeteer find local Chrome in dev
+
     this.client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'car-scraper-bot',
@@ -52,7 +56,9 @@ export class WhatsappService implements OnModuleInit {
       puppeteer: {
         headless: true,
         timeout: 60000,
+        executablePath, // 👈 important
         args: [
+          ...chromium.args, // 👈 recommended args for AWS/Heroku
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
