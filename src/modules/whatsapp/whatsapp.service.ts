@@ -53,7 +53,7 @@ export class WhatsappService implements OnModuleInit {
       }),
       puppeteer: {
         headless: true,
-        executablePath: executablePath,
+        executablePath: '/app/.apt/usr/bin/google-chrome-stable',
         timeout: 60000, // Increase timeout
         args: [
           '--no-sandbox',
@@ -97,28 +97,6 @@ export class WhatsappService implements OnModuleInit {
       );
       return false;
     }
-  }
-
-  private getChromePath(): string | undefined {
-    // Try to use system Chrome first, then fall back to Puppeteer's Chrome
-    const possiblePaths = [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
-      '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
-      '/usr/bin/google-chrome', // Linux
-      '/usr/bin/chromium-browser', // Linux Chromium
-      process.env.CHROME_PATH, // Custom path from environment
-    ];
-
-    const fs = require('fs');
-    for (const path of possiblePaths) {
-      if (path && fs.existsSync(path)) {
-        this.logger.log(`Using Chrome at: ${path}`);
-        return path;
-      }
-    }
-
-    this.logger.log('Using Puppeteer bundled Chrome');
-    return undefined; // Let Puppeteer use its bundled Chrome
   }
 
   private setupEventHandlers() {
