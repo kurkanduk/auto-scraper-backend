@@ -53,7 +53,6 @@ export class WhatsappService implements OnModuleInit {
       }),
       puppeteer: {
         headless: true,
-        executablePath: '/app/.apt/usr/bin/google-chrome-stable',
         timeout: 60000, // Increase timeout
         args: [
           '--no-sandbox',
