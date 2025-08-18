@@ -6,6 +6,7 @@ import * as qrcode from 'qrcode-terminal';
 import { Listing } from '../../entities/listing.entity';
 import { ContactLog, ContactStatus } from '../../entities/contact-log.entity';
 import { defaultConfig } from '../../config/app.config';
+import chromium from 'chrome-aws-lambda';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -45,13 +46,14 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private initializeClient() {
+    const executablePath = process.env.CHROME_BIN || '/usr/bin/google-chrome';
     this.client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'car-scraper-bot',
       }),
       puppeteer: {
         headless: true,
-        executablePath: process.env.CHROME_BIN || '/usr/bin/google-chrome',
+        executablePath: executablePath,
         timeout: 60000, // Increase timeout
         args: [
           '--no-sandbox',

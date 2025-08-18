@@ -15,13 +15,11 @@ export abstract class BaseScraperService {
         process.env.CHROME_BIN ||
         (await chromium.executablePath) ||
         '/usr/bin/google-chrome';
-      const args = chromium.args || [];
 
       this.browser = await puppeteer.launch({
         headless: true,
         executablePath: executablePath || undefined,
         args: [
-          ...args,
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
