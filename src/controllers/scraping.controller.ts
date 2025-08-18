@@ -243,6 +243,8 @@ export class ScrapingController {
         source: source || 'all',
         timestamp: new Date(),
       };
+    } catch {
+      console.log('error');
     }
   }
   @Get('test-autoscout')
