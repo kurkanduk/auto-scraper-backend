@@ -11,8 +11,10 @@ export abstract class BaseScraperService {
   protected browser: Browser;
   protected async initBrowser(): Promise<void> {
     if (!this.browser) {
-      const executablePath = await chromium.executablePath;
-
+      const executablePath =
+        process.env.CHROME_BIN ||
+        (await chromium.executablePath) ||
+        '/usr/bin/google-chrome';
       const args = chromium.args || [];
 
       this.browser = await puppeteer.launch({
