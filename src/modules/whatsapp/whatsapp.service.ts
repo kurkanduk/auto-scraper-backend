@@ -46,7 +46,7 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private initializeClient() {
-    const executablePath = process.env.CHROME_BIN || '/usr/bin/google-chrome';
+    const executablePath = process.env.CHROME_BIN || undefined;
     this.client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'car-scraper-bot',
