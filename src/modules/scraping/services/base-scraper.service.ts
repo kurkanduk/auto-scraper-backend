@@ -17,7 +17,7 @@ export abstract class BaseScraperService {
 
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath: executablePath || undefined,
+        executablePath: '/app/.chrome-for-testing/chrome-linux64/chrome',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
