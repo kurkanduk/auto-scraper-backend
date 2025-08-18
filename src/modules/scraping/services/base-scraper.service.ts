@@ -12,12 +12,12 @@ export abstract class BaseScraperService {
 
   protected async initBrowser(): Promise<void> {
     if (!this.browser) {
-      const executablePath = await chromium.executablePath;
       console.log(process.env.CHROME_BIN);
 
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath: process.env.CHROME_BIN || executablePath, // если null → puppeteer-core возьмёт встроенный путь
+        executablePath:
+          process.env.CHROME_BIN || '/app/.apt/usr/bin/google-chrome',
         args: [
           ...chromium.args,
           '--no-sandbox',
