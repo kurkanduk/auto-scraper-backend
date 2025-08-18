@@ -51,7 +51,7 @@ export class WhatsappService implements OnModuleInit {
       }),
       puppeteer: {
         headless: true,
-        executablePath: this.getChromePath(),
+        executablePath: process.env.CHROME_BIN || '/usr/bin/google-chrome',
         timeout: 60000, // Increase timeout
         args: [
           '--no-sandbox',
