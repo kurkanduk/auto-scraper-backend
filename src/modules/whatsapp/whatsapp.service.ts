@@ -99,7 +99,7 @@ export class WhatsappService implements OnModuleInit {
   private setupEventHandlers() {
     this.client.on('qr', (qr) => {
       this.logger.log('QR Code received, scan with WhatsApp:');
-      qrcode.generate(qr, { small: true });
+      qrcode.generate(qr);
     });
 
     this.client.on('ready', () => {
