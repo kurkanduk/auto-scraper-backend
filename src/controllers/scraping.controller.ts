@@ -233,6 +233,18 @@ export class ScrapingController {
       };
     }
   }
+  @Post('manual-sending')
+  async manualSending(@Query('source') source?: string) {
+    try {
+      const result = await this.MessagingCronService.startManualSending();
+      return {
+        success: true,
+        message: result,
+        source: source || 'all',
+        timestamp: new Date(),
+      };
+    }
+  }
   @Get('test-autoscout')
   async testAutoscout(@Query('limit') limit: string = '1') {
     try {

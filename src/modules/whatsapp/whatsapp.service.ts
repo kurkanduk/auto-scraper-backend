@@ -162,8 +162,6 @@ export class WhatsappService implements OnModuleInit {
         this.generateMessage(listing),
         ContactStatus.SENT,
       );
-
-      return true;
     }
 
     return new Promise((resolve, reject) => {
@@ -181,12 +179,6 @@ export class WhatsappService implements OnModuleInit {
 
       try {
         // Check rate limiting
-        if (!this.canSendMessage()) {
-          this.logger.warn('Rate limit reached, queuing message for later');
-          this.messageQueue.unshift({ listing, resolve, reject });
-          setTimeout(() => this.processMessageQueue(), 60000); // Try again in 1 minute
-          break;
-        }
 
         const success = await this.sendWhatsAppMessage(listing);
         resolve(success);
@@ -208,36 +200,16 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private testMessages: string[] = [
-    'Hello, are you still selling this car?',
-    'Good day! Is the car still available?',
-    'Hi! I’d like to ask about your car',
-    'Hello! Is this listing still active?',
-    'I’m interested in this car, can I get more details?',
-    'Are you still selling the car?',
-    'Is the car still for sale?',
-    'Can you clarify the price for this car?',
-    'Good day! Is this listing still valid?',
-    'Hello! I’d like to ask about the car',
-    'Is this car still with you?',
-    'Can I schedule a viewing?',
-    'Good evening! Is the car still available?',
-    'Hello! I’m interested in this car',
-    'Is the listing still active?',
-    'Are you selling this car? I’d like to discuss',
-    'I’m interested in the car, is it still for sale?',
-    'Hello, is the car available for viewing?',
-    'Is this a new listing? Has the car been sold?',
-    'Good day! Is the car still on sale?',
+    'Dobrý deň, chcel by som sa opýtať, či je auto stále k dispozícii?',
   ];
 
   private async sendWhatsAppMessage(listing: Listing): Promise<boolean> {
     try {
-      const testNumber = '+421950242008'; // твой тестовый номер
       const number =
         listing.source === 'otomoto'
           ? `+48${listing.sellerPhone}`
           : listing.sellerPhone;
-      const chatId = `${this.formatPhoneNumber(testNumber)}@c.us`;
+      const chatId = `${this.formatPhoneNumber(number)}@c.us`;
 
       // Берём случайное сообщение из массива
       const message =

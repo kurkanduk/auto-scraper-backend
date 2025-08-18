@@ -17,9 +17,8 @@ export class MessagingCronService {
     const now = new Date();
     const hour = now.getHours();
 
-    if (hour < 9 || hour >= 18) {
+    if (hour < 9 || hour >= 20) {
       this.logger.log('⏸️ Outside working hours, skipping messages');
-      return;
     }
 
     const listings = await this.scrapingService.getRecentListings(limit);
@@ -39,7 +38,7 @@ export class MessagingCronService {
   }
 
   // Крон-запуск
-  @Cron(CronExpression.EVERY_HOUR, { name: 'messages' })
+  @Cron(CronExpression.EVERY_10_MINUTES, { name: 'messages' })
   async handleCron() {
     await this.sendMessagesFromListings(10);
   }
