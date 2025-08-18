@@ -214,6 +214,25 @@ export class ScrapingController {
       };
     }
   }
+  @Post('manual')
+  async manualScrape(@Query('source') source?: string) {
+    try {
+      const result = await this.scrapingService.manualScrape(source);
+      return {
+        success: true,
+        message: result,
+        source: source || 'all',
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        source: source || 'all',
+        timestamp: new Date(),
+      };
+    }
+  }
   @Get('test-autoscout')
   async testAutoscout(@Query('limit') limit: string = '1') {
     try {
