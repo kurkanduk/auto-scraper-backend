@@ -9,17 +9,17 @@ import * as cheerio from 'cheerio';
 export abstract class BaseScraperService {
   protected readonly logger = new Logger(this.constructor.name);
   protected browser: Browser;
-
   protected async initBrowser(): Promise<void> {
     if (!this.browser) {
-      console.log(process.env.CHROME_BIN);
+      const executablePath = await chromium.executablePath;
+
+      const args = chromium.args || [];
 
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath:
-          process.env.CHROME_BIN || '/app/.apt/usr/bin/google-chrome',
+        executablePath: executablePath || undefined,
         args: [
-          ...chromium.args,
+          ...args,
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
@@ -34,7 +34,6 @@ export abstract class BaseScraperService {
       });
     }
   }
-
   protected async createPage(): Promise<Page> {
     await this.initBrowser();
     const page = await this.browser.newPage();
