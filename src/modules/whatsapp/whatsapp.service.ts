@@ -5,8 +5,8 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import { Listing } from '../../entities/listing.entity';
 import { ContactLog, ContactStatus } from '../../entities/contact-log.entity';
+
 import { defaultConfig } from '../../config/app.config';
-import chromium from 'chrome-aws-lambda';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -247,11 +247,9 @@ export class WhatsappService implements OnModuleInit {
       await this.client.sendMessage(chatId, message);
 
       // Логируем
-      await this.logContact(listing, testNumber, message, ContactStatus.SENT);
+      await this.logContact(listing, number, message, ContactStatus.SENT);
 
-      this.logger.log(
-        `(TEST MODE) Message sent to ${testNumber}: "${message}"`,
-      );
+      this.logger.log(`(TEST MODE) Message sent to ${number}: "${message}"`);
       return true;
     } catch (error) {
       this.logger.error(
