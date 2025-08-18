@@ -466,7 +466,10 @@ export class AutoScoutScraperService
                 this.logger.debug(
                   'Button still shows "Показати номер", clicking again...',
                 );
-                await page.evaluate((el) => el.click(), stillButton);
+                await page.evaluate(
+                  (el) => (el as HTMLElement).click(),
+                  stillButton,
+                );
                 await this.delay(3000);
               }
             }
