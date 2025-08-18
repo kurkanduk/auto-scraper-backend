@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
+import chromium from 'chrome-aws-lambda';
+
 import * as cheerio from 'cheerio';
 
 @Injectable()
@@ -9,10 +11,14 @@ export abstract class BaseScraperService {
 
   protected async initBrowser(): Promise<void> {
     if (!this.browser) {
+      const executablePath =
+        process.env.CHROME_EXECUTABLE_PATH || (await chromium.executablePath);
+
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath: this.getChromePath(),
+        executablePath: executablePath || undefined,
         args: [
+          ...chromium.args,
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
@@ -38,6 +44,7 @@ export abstract class BaseScraperService {
       process.env.CHROME_PATH, // Custom path from environment
     ];
 
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
     for (const path of possiblePaths) {
       if (path && fs.existsSync(path)) {
