@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { BaseScraperService } from './base-scraper.service';
-import { ScrapedListing, ScraperInterface } from '../interfaces/scraper.interface';
+import {
+  ScrapedListing,
+  ScraperInterface,
+} from '../interfaces/scraper.interface';
 import { ListingSource } from '../../../entities/listing.entity';
 
 @Injectable()
-export class BazosScraperService extends BaseScraperService implements ScraperInterface {
-  
+export class BazosScraperService
+  extends BaseScraperService
+  implements ScraperInterface
+{
   getSource(): ListingSource {
     return ListingSource.BAZOS;
   }
@@ -16,10 +21,10 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
     try {
       const page = await this.createPage();
-      
+
       // Search URL for Slovak Bazos auto section
       const searchUrl = 'https://auto.bazos.sk/';
-      
+
       await page.goto(searchUrl, { waitUntil: 'networkidle2' });
       await this.delay(3000);
 
@@ -29,20 +34,25 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
       // Find listing items using the correct structure
       const listingElements = $('.inzeraty.inzeratyflex').toArray();
 
-      for (const element of listingElements.slice(0, 20)) { // Limit to first 20 listings
+      for (const element of listingElements.slice(0, 20)) {
+        // Limit to first 20 listings
         try {
           const $element = $(element);
-          
+
           // Extract basic info using the correct Bazos structure
-          const titleElement = $element.find('h2.nadpis a[href*="/inzerat/"]').first();
+          const titleElement = $element
+            .find('h2.nadpis a[href*="/inzerat/"]')
+            .first();
           const title = this.cleanText(titleElement.text());
           const relativeUrl = titleElement.attr('href');
-          
+
           if (!title || !relativeUrl) continue;
-          
-          const url = relativeUrl.startsWith('http') ? relativeUrl : `https://auto.bazos.sk${relativeUrl}`;
+
+          const url = relativeUrl.startsWith('http')
+            ? relativeUrl
+            : `https://auto.bazos.sk${relativeUrl}`;
           const externalId = this.extractIdFromUrl(url);
-          
+
           if (!externalId) continue;
 
           // Extract price from the dedicated price div
@@ -51,7 +61,9 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
           const priceInfo = this.parsePrice(priceText);
 
           // Extract location - try both possible class names
-          const locationElement = $element.find('.inzeratylok, .inzeratylokalita');
+          const locationElement = $element.find(
+            '.inzeratylok, .inzeratylokalita',
+          );
           const location = this.cleanText(locationElement.text());
 
           // Extract description from the description div
@@ -85,15 +97,14 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
               scrapedAt: new Date(),
               html: $element.html(),
               fullText: descText,
-              originalPrice: priceText
-            }
+              originalPrice: priceText,
+            },
           };
 
           // Only include if it's likely a private seller
           if (sellerType === 'private') {
             listings.push(listing);
           }
-
         } catch (error) {
           this.logger.error(`Error processing listing: ${error.message}`);
         }
@@ -101,7 +112,6 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
       await page.close();
       this.logger.log(`Scraped ${listings.length} listings from bazos`);
-
     } catch (error) {
       this.logger.error(`Error scraping bazos: ${error.message}`);
     }
@@ -123,29 +133,35 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
     return { make, model };
   }
 
-  private extractSpecsFromText(text: string): { year?: number; mileage?: number; fuelType?: string } {
+  private extractSpecsFromText(text: string): {
+    year?: number;
+    mileage?: number;
+    fuelType?: string;
+  } {
     // Extract year
     const yearMatch = text.match(/\b(19|20)\d{2}\b/);
     const year = yearMatch ? parseInt(yearMatch[0]) : undefined;
 
     // Extract mileage (Slovak/Czech format with various separators)
     const mileageMatch = text.match(/(\d+[\d\s.,]*)\s*km/i);
-    const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/[\s.,]/g, '')) : undefined;
+    const mileage = mileageMatch
+      ? parseInt(mileageMatch[1].replace(/[\s.,]/g, ''))
+      : undefined;
 
     // Extract fuel type (Slovak and Czech terms)
     let fuelType: string | undefined;
     const fuelKeywords = {
-      'benzín': 'petrol',
-      'benzin': 'petrol',
-      'nafta': 'diesel',
-      'diesel': 'diesel',
-      'tdi': 'diesel',
-      'lpg': 'lpg',
-      'cng': 'cng',
-      'elektro': 'electric',
-      'electric': 'electric',
-      'hybrid': 'hybrid',
-      'hybridný': 'hybrid'
+      benzín: 'petrol',
+      benzin: 'petrol',
+      nafta: 'diesel',
+      diesel: 'diesel',
+      tdi: 'diesel',
+      lpg: 'lpg',
+      cng: 'cng',
+      elektro: 'electric',
+      electric: 'electric',
+      hybrid: 'hybrid',
+      hybridný: 'hybrid',
     };
 
     const lowerText = text.toLowerCase();
@@ -161,12 +177,25 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
   private determineSellerType(text: string): 'private' | 'dealer' | 'unknown' {
     const lowerText = text.toLowerCase();
-    
+
     // Dealer indicators (Slovak and Czech)
     const dealerKeywords = [
-      'autosalon', 'salon', 'auto centrum', 'dealer', 'predaj vozidiel',
-      's.r.o.', 'spol.', 'company', 'firma', 'obchod', 'autobazár',
-      'autocentrum', 'servis', 'dovoz', 'import', 'autodom'
+      'autosalon',
+      'salon',
+      'auto centrum',
+      'dealer',
+      'predaj vozidiel',
+      's.r.o.',
+      'spol.',
+      'company',
+      'firma',
+      'obchod',
+      'autobazár',
+      'autocentrum',
+      'servis',
+      'dovoz',
+      'import',
+      'autodom',
     ];
 
     for (const keyword of dealerKeywords) {
@@ -177,8 +206,17 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
     // Private seller indicators (Slovak and Czech)
     const privateKeywords = [
-      'súkromný', 'soukromý', 'privát', 'private', 'osobné', 'osobní', 
-      'predám', 'prodám', 'vlastné', 'vlastní', 'nepotrebuje'
+      'súkromný',
+      'soukromý',
+      'privát',
+      'private',
+      'osobné',
+      'osobní',
+      'predám',
+      'prodám',
+      'vlastné',
+      'vlastní',
+      'nepotrebuje',
     ];
 
     for (const keyword of privateKeywords) {
@@ -193,7 +231,7 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
   async scrapeDetailedListing(url: string): Promise<Partial<ScrapedListing>> {
     this.logger.log(`Scraping detailed info from: ${url}`);
-    
+
     try {
       const page = await this.createPage();
       await page.goto(url, { waitUntil: 'networkidle2' });
@@ -204,11 +242,11 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
       // Extract description
       const description = this.cleanText($('.popisdetail').text());
-      
+
       // Extract seller information
       const sellerInfo = $('.listadvlevo').text();
       const sellerName = this.extractSellerName(sellerInfo);
-      
+
       // Extract phone number
       let sellerPhone = null;
       const phoneText = $('.teldetail').text() || sellerInfo;
@@ -227,9 +265,8 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
         year: specs.year,
         mileage: specs.mileage,
         fuelType: specs.fuelType,
-        rawData: { detailsText, sellerInfo }
+        rawData: { detailsText, sellerInfo },
       };
-
     } catch (error) {
       this.logger.error(`Error scraping detailed listing: ${error.message}`);
       return {};
@@ -238,15 +275,23 @@ export class BazosScraperService extends BaseScraperService implements ScraperIn
 
   private extractSellerName(text: string): string | null {
     // Extract name from seller info text
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line);
-    
+    const lines = text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line);
+
     // First non-empty line is usually the name
     for (const line of lines) {
-      if (line && !line.includes('tel:') && !line.includes('email:') && line.length > 2) {
+      if (
+        line &&
+        !line.includes('tel:') &&
+        !line.includes('email:') &&
+        line.length > 2
+      ) {
         return line;
       }
     }
-    
+
     return null;
   }
 }

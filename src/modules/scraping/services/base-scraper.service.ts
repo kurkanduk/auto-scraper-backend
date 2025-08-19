@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import puppeteer, { Browser, Page } from 'puppeteer';
 
-import chromium from 'chrome-aws-lambda';
 import * as cheerio from 'cheerio';
 
 @Injectable()
@@ -10,14 +9,11 @@ export abstract class BaseScraperService {
   protected browser: Browser;
   protected async initBrowser(): Promise<void> {
     if (!this.browser) {
-      const executablePath =
-        process.env.CHROME_BIN ||
-        (await chromium.executablePath) ||
-        '/usr/bin/google-chrome';
+      const executablePath = this.getChromePath();
 
       this.browser = await puppeteer.launch({
         headless: true,
-        executablePath: '/app/.chrome-for-testing/chrome-linux64/chrome',
+        executablePath: executablePath,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -46,6 +42,28 @@ export abstract class BaseScraperService {
     await page.setViewport({ width: 1920, height: 1080 });
 
     return page;
+  }
+
+  private getChromePath(): string | undefined {
+    // Try to use system Chrome first, then fall back to Puppeteer's Chrome
+    const possiblePaths = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
+      '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
+      '/usr/bin/google-chrome', // Linux
+      '/usr/bin/chromium-browser', // Linux Chromium
+      process.env.CHROME_PATH, // Custom path from environment
+    ];
+
+    const fs = require('fs');
+    for (const path of possiblePaths) {
+      if (path && fs.existsSync(path)) {
+        this.logger.log(`Using Chrome at: ${path}`);
+        return path;
+      }
+    }
+
+    this.logger.log('Using Puppeteer bundled Chrome');
+    return undefined; // Let Puppeteer use its bundled Chrome
   }
 
   protected async delay(ms: number): Promise<void> {

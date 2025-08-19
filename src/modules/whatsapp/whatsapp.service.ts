@@ -7,6 +7,7 @@ import { Listing } from '../../entities/listing.entity';
 import { ContactLog, ContactStatus } from '../../entities/contact-log.entity';
 
 import { defaultConfig } from '../../config/app.config';
+import { MessagePool } from 'src/entities/message-pull.entity';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -27,6 +28,8 @@ export class WhatsappService implements OnModuleInit {
   constructor(
     @InjectRepository(ContactLog)
     private contactLogRepository: Repository<ContactLog>,
+    @InjectRepository(MessagePool)
+    private MessagesPool: Repository<MessagePool>,
   ) {
     this.initializeClient();
   }
@@ -49,7 +52,7 @@ export class WhatsappService implements OnModuleInit {
         clientId: 'car-scraper-bot',
       }),
       puppeteer: {
-        executablePath: '/app/.chrome-for-testing/chrome-linux64/chrome',
+        executablePath: this.getChromePath(),
         headless: true,
         timeout: 60000,
         args: [
@@ -72,6 +75,27 @@ export class WhatsappService implements OnModuleInit {
     });
 
     this.setupEventHandlers();
+  }
+  private getChromePath(): string | undefined {
+    // Try to use system Chrome first, then fall back to Puppeteer's Chrome
+    const possiblePaths = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
+      '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
+      '/usr/bin/google-chrome', // Linux
+      '/usr/bin/chromium-browser', // Linux Chromium
+      process.env.CHROME_PATH, // Custom path from environment
+    ];
+
+    const fs = require('fs');
+    for (const path of possiblePaths) {
+      if (path && fs.existsSync(path)) {
+        this.logger.log(`Using Chrome at: ${path}`);
+        return path;
+      }
+    }
+
+    this.logger.log('Using Puppeteer bundled Chrome');
+    return undefined; // Let Puppeteer use its bundled Chrome
   }
 
   async sendTestMessage(): Promise<boolean> {
@@ -134,7 +158,7 @@ export class WhatsappService implements OnModuleInit {
   private async startClient() {
     try {
       this.logger.log('Initializing WhatsApp client...');
-      await this.client.initialize();
+      // await this.client.initialize();
     } catch (error) {
       this.logger.error('Failed to initialize WhatsApp client:', error.message);
       this.logger.warn(
@@ -198,9 +222,8 @@ export class WhatsappService implements OnModuleInit {
       }
     }
   }
-
-  private testMessages: string[] = [
-    'Dobrý deň, chcel by som sa opýtať, či je auto stále k dispozícii?',
+  private testMessages = [
+    'Dobrý deň, chcel by som sa opýtať, či je auto stále k dispozícii?',
   ];
 
   private async sendWhatsAppMessage(listing: Listing): Promise<boolean> {
@@ -211,23 +234,45 @@ export class WhatsappService implements OnModuleInit {
           : listing.sellerPhone;
       const chatId = `${this.formatPhoneNumber(number)}@c.us`;
 
-      // Берём случайное сообщение из массива
-      const message =
-        this.testMessages[Math.floor(Math.random() * this.testMessages.length)];
+      let messages: string[] = [];
+      try {
+        messages = await this.getMessagesFromDB();
+      } catch (dbError) {
+        this.logger.warn(
+          `Failed to fetch messages from DB: ${dbError.message}`,
+        );
+      }
 
-      // Отправляем
+      if (!messages || messages.length === 0) {
+        messages = this.testMessages;
+        this.logger.log('Using fallback messages');
+      }
+
+      const message = messages[Math.floor(Math.random() * messages.length)];
+
       await this.client.sendMessage(chatId, message);
 
-      // Логируем
       await this.logContact(listing, number, message, ContactStatus.SENT);
 
-      this.logger.log(`(TEST MODE) Message sent to ${number}: "${message}"`);
+      this.logger.log(`Message sent to ${number}: "${message}"`);
       return true;
     } catch (error) {
-      this.logger.error(
-        `Failed to send WhatsApp test message: ${error.message}`,
-      );
+      this.logger.error(`Failed to send WhatsApp message: ${error.message}`);
       return false;
+    }
+  }
+
+  private async getMessagesFromDB(): Promise<string[]> {
+    try {
+      const messages = await this.MessagesPool.find({
+        where: { isActive: true },
+        select: ['content'],
+      });
+
+      return messages.map((m) => m.content);
+    } catch (error) {
+      this.logger.error(`Failed to fetch messages from DB: ${error.message}`);
+      return [];
     }
   }
 

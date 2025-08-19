@@ -9,6 +9,7 @@ import { databaseConfig } from './config/database.config';
 import { ScrapingModule } from './modules/scraping/scraping.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { FilteringModule } from './modules/filtering/filtering.module';
+import { MessagePoolModule } from './modules/message-pull/message-pull.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { FilteringModule } from './modules/filtering/filtering.module';
     ScrapingModule,
     WhatsappModule,
     FilteringModule,
+    MessagePoolModule,
   ],
   controllers: [AppController, ScrapingController],
   providers: [AppService],
