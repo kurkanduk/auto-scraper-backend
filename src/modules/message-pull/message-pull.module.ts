@@ -9,6 +9,6 @@ import { MessagePoolController } from '../../controllers/message-pull.controller
   imports: [TypeOrmModule.forFeature([MessagePool])],
   providers: [MessagePoolService],
   controllers: [MessagePoolController],
-  exports: [MessagePoolService],
+  exports: [MessagePoolService, TypeOrmModule],
 })
 export class MessagePoolModule {}
