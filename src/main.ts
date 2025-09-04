@@ -5,7 +5,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: ['https://auto-bot-frontend.vercel.app', 'http://localhost:5173'],
+    origin: [
+      'https://auto-bot-frontend.vercel.app',
+      'http://localhost:5173',
+      'http://194.163.167.191:3003',
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
