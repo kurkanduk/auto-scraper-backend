@@ -52,7 +52,7 @@ export class WhatsappService implements OnModuleInit {
         clientId: 'car-scraper-bot',
       }),
       puppeteer: {
-        executablePath: this.getChromePath(),
+        executablePath: '/usr/bin/chromium-browser',
         headless: true,
         timeout: 60000,
         args: [
@@ -82,7 +82,7 @@ export class WhatsappService implements OnModuleInit {
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
       '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
       '/usr/bin/google-chrome', // Linux
-      '/usr/bin/chromium-browser', // Linux Chromium
+      '', // Linux Chromium
       process.env.CHROME_PATH, // Custom path from environment
     ];
 
