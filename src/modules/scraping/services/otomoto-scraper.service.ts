@@ -416,12 +416,21 @@ export class OtomotoScraperService
   async scrapeDetailedListing(url: string): Promise<Partial<ScrapedListing>> {
     this.logger.debug(`Scraping detailed info from: ${url}`);
 
+    let page;
     try {
-      const page = await this.createPage();
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 });
-      await this.delay(1000);
+      page = await this.createPage();
 
-      // Try to click the "Zadzwoń" button to reveal phone number
+      // Set a shorter timeout for faster failures
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded', // Changed from 'networkidle2' for faster loading
+        timeout: 8000, // Reduced from 10000
+      });
+
+      // Reduced initial delay
+      await this.delay(500);
+
+      // Extract phone number using original working logic
+      let phoneNumber;
       try {
         // Wait for the page to load completely
         await page.waitForSelector('button[data-button-variant="secondary"]', {
@@ -450,15 +459,15 @@ export class OtomotoScraperService
           this.logger.debug('Found "Wyświetl numer" button, clicking...');
 
           // Click the button using the element we already found
-          await showNumberButton.click();
+          await page.evaluate((btn) => btn.click(), showNumberButton);
           await this.delay(5000); // Wait 5 seconds for phone number to appear
 
           // After clicking, look for the tel: link that contains the phone number
           // Look specifically in the div with class ooa-e2su5n ed4qow40
-          const phoneDiv = await page.$('div.ooa-e2su5n.ed4qow40');
+          const phoneDiv = await page.$('div.ooa-e2su5n.e1it56680');
 
-          // If the button is still showing "Wyświetl numer", try clicking it again
           if (phoneDiv) {
+            // If the button is still showing "Wyświetl numer", try clicking it again
             const buttonInDiv = await phoneDiv.$('button');
             if (buttonInDiv) {
               const buttonText = await page.evaluate(
@@ -470,38 +479,13 @@ export class OtomotoScraperService
                   'Button still shows "Wyświetl numer", clicking again...',
                 );
                 await page.evaluate((el) => el.click(), buttonInDiv);
-
                 await this.delay(3000); // Wait more time after second click
               }
             }
-          }
-          this.logger.debug(`Phone div found: ${phoneDiv ? 'yes' : 'no'}`);
 
-          if (phoneDiv) {
-            // Log ALL content from this div
-            const divContent = await page.evaluate(
-              (el) => el.innerHTML,
-              phoneDiv,
-            );
-            this.logger.debug(`Phone div content: ${divContent}`);
+            this.logger.debug(`Phone div found: ${phoneDiv ? 'yes' : 'no'}`);
 
-            // Log all links from this div
-            const allLinksInDiv = await phoneDiv.$$('a');
-            this.logger.debug(
-              `Found ${allLinksInDiv.length} links in phone div`,
-            );
-
-            for (const link of allLinksInDiv) {
-              const href = await page.evaluate(
-                (el) => el.getAttribute('href'),
-                link,
-              );
-              const text = await page.evaluate((el) => el.textContent, link);
-              this.logger.debug(
-                `Phone div link: href="${href}" text="${text}"`,
-              );
-            }
-
+            // Look for tel link in phone div
             const telLink = await phoneDiv.$('a[href^="tel:"]');
             if (telLink) {
               const href = await page.evaluate(
@@ -511,84 +495,55 @@ export class OtomotoScraperService
               this.logger.debug(`Found tel link in phone div: "${href}"`);
 
               if (href && href.startsWith('tel:')) {
-                const phoneNumber = href.replace('tel:', '').trim();
-                if (phoneNumber && this.isValidPolishPhone(phoneNumber)) {
-                  this.logger.debug(`Found phone in tel link: ${phoneNumber}`);
-                  return { sellerPhone: phoneNumber };
+                const phone = href.replace('tel:', '').trim();
+                if (phone && this.isValidPolishPhone(phone)) {
+                  this.logger.debug(`Found phone in tel link: ${phone}`);
+                  phoneNumber = phone;
                 }
               }
             }
           }
 
           // Fallback: also check all tel links on the page
-          const telLinks = await page.$$('a[href^="tel:"]');
-          this.logger.debug(
-            `Found ${telLinks.length} tel links after click (fallback)`,
-          );
-
-          for (const telLink of telLinks) {
-            const href = await page.evaluate(
-              (el) => el.getAttribute('href'),
-              telLink,
+          if (!phoneNumber) {
+            const telLinks = await page.$$('a[href^="tel:"]');
+            this.logger.debug(
+              `Found ${telLinks.length} tel links after click (fallback)`,
             );
-            this.logger.debug(`Tel link href: "${href}"`);
 
-            if (href && href.startsWith('tel:')) {
-              const phoneNumber = href.replace('tel:', '').trim();
-              if (phoneNumber && this.isValidPolishPhone(phoneNumber)) {
-                this.logger.debug(`Found phone in tel link: ${phoneNumber}`);
-                return { sellerPhone: phoneNumber };
+            for (const telLink of telLinks) {
+              const href = await page.evaluate(
+                (el) => el.getAttribute('href'),
+                telLink,
+              );
+              this.logger.debug(`Tel link href: "${href}"`);
+
+              if (href && href.startsWith('tel:')) {
+                const phone = href.replace('tel:', '').trim();
+                if (phone && this.isValidPolishPhone(phone)) {
+                  this.logger.debug(`Found phone in tel link: ${phone}`);
+                  phoneNumber = phone;
+                  break;
+                }
               }
             }
           }
         }
-      } catch (error) {
-        this.logger.debug(`Could not click call button: ${error.message}`);
+      } catch (phoneError) {
+        this.logger.debug(`Could not click call button: ${phoneError.message}`);
       }
 
+      // Extract other content using cheerio for better performance
       const content = await page.content();
       const $ = this.loadCheerio(content);
 
-      // Extract description - try multiple selectors for Otomoto
-      let description = '';
-      const descriptionSelectors = [
-        '[data-testid="ad-description"]',
-        '.ad-description',
-        '.ooa-1afgq2j0',
-        '.description',
-        '[data-testid="description"]',
-      ];
-
-      for (const selector of descriptionSelectors) {
-        const descElement = $(selector);
-        if (descElement.length > 0) {
-          description = this.cleanText(descElement.text());
-          break;
-        }
-      }
-
-      // Extract seller information
-      let sellerName = '';
-      const sellerSelectors = [
-        '[data-testid="seller-name"]',
-        '.seller-name',
-        '.ooa-1jb4k0u',
-        '.seller-info',
-      ];
-
-      for (const selector of sellerSelectors) {
-        const sellerElement = $(selector);
-        if (sellerElement.length > 0) {
-          sellerName = this.cleanText(sellerElement.text());
-          break;
-        }
-      }
-
-      await page.close();
+      const description = this.extractDescription($);
+      const sellerName = this.extractSellerName($);
 
       return {
         description,
         sellerName,
+        sellerPhone: phoneNumber,
         rawData: {
           scrapedAt: new Date(),
           url,
@@ -597,9 +552,54 @@ export class OtomotoScraperService
     } catch (error) {
       this.logger.error(`Error scraping detailed listing: ${error.message}`);
       return {};
+    } finally {
+      // Ensure page is always closed
+      if (page && !page.isClosed()) {
+        try {
+          await page.close();
+        } catch (closeError) {
+          this.logger.error(`Error closing page: ${closeError.message}`);
+        }
+      }
     }
   }
 
+  // Extracted description logic
+  private extractDescription($: any): string {
+    const descriptionSelectors = [
+      '[data-testid="ad-description"]',
+      '.ad-description',
+      '.ooa-1afgq2j0',
+      '.description',
+      '[data-testid="description"]',
+    ];
+
+    for (const selector of descriptionSelectors) {
+      const element = $(selector);
+      if (element.length > 0) {
+        return this.cleanText(element.text());
+      }
+    }
+    return '';
+  }
+
+  // Extracted seller name logic
+  private extractSellerName($: any): string {
+    const sellerSelectors = [
+      '[data-testid="seller-name"]',
+      '.seller-name',
+      '.ooa-1jb4k0u',
+      '.seller-info',
+    ];
+
+    for (const selector of sellerSelectors) {
+      const element = $(selector);
+      if (element.length > 0) {
+        return this.cleanText(element.text());
+      }
+    }
+    return '';
+  }
   private mapSellerType(sellerType?: string): SellerType {
     switch (sellerType?.toLowerCase()) {
       case 'private':

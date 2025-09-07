@@ -38,16 +38,17 @@ export class AutoScoutScraperService
 
       // Search URL for cars from private sellers
       const searchUrl =
-        'https://www.autoscout24.com.ua/lst?atype=C&cy=D%2CA%2CI%2CB%2CNL%2CE%2CL%2CF&desc=0&page=1&search_id=nj7v8repfy&sort=standard&source=listpage_pagination&ustate=N%2CU';
+        'https://www.autoscout24.com/lst?atype=C&cy=D%2CA%2CI%2CB%2CNL%2CE%2CL%2CF&desc=0&page=3&search_id=nj7v8repfy&sort=standard&source=listpage_pagination&ustate=N%2CU';
       await page.goto(searchUrl, { waitUntil: 'networkidle2' });
       await this.delay(3000);
 
       // Accept cookies if present
       try {
-        await page.waitForSelector('[data-testid="cookie-consent-accept"]', {
-          timeout: 5000,
-        });
-        await page.click('[data-testid="cookie-consent-accept"]');
+        await page.waitForSelector(
+          '[data-testid="as24-cmp-accept-all-button"]',
+          { timeout: 5000 },
+        );
+        await page.click('[data-testid="as24-cmp-accept-all-button"]');
         await this.delay(1000);
       } catch (e) {
         // No cookies banner
@@ -56,9 +57,7 @@ export class AutoScoutScraperService
       const content = await page.content();
       const $ = this.loadCheerio(content);
 
-      // Find listing items using the correct Otomoto structure
-      // ...existing code...
-
+      // Updated selector for AutoScout24 articles
       const listingElements = $('article[data-testid="list-item"]').toArray();
 
       this.logger.debug(
@@ -69,70 +68,97 @@ export class AutoScoutScraperService
         try {
           const $element = $(element);
 
-          // Extract detail page link
-          const detailLink = $element
-            .find('.ListItem_header__J6xlG a')
-            .attr('href');
-          if (!detailLink) {
-            this.logger.debug(`No detail link found for listing`);
+          // Extract data from data attributes (more reliable than text parsing)
+          const externalId = $element.attr('data-guid');
+          if (!externalId) {
+            this.logger.debug('No GUID found for listing');
             continue;
           }
-          const url = detailLink.startsWith('http')
-            ? detailLink
-            : `https://www.autoscout24.com.ua${detailLink}`;
 
-          // Extract title
-          const title = this.cleanText(
+          // Extract price from data attribute
+          const priceAttr = $element.attr('data-price');
+          const price = priceAttr ? parseInt(priceAttr, 10) : undefined;
+
+          // Extract make and model from data attributes
+          const make = $element.attr('data-make');
+          const model = $element.attr('data-model');
+
+          // Extract mileage from data attribute
+          const mileageAttr = $element.attr('data-mileage');
+          const mileage = mileageAttr ? parseInt(mileageAttr, 10) : undefined;
+
+          // Extract year from data attribute
+          const yearAttr = $element.attr('data-first-registration');
+          let year = undefined;
+          if (yearAttr) {
+            const yearMatch = yearAttr.match(/(\d{4})/);
+            year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
+          }
+
+          // Extract fuel type from data attribute
+          const fuelTypeAttr = $element.attr('data-fuel-type');
+          const fuelTypeMap = {
+            b: 'Бензин',
+            d: 'Дизель',
+            e: 'Электро',
+            h: 'Гибрид',
+            g: 'Газ',
+            cng: 'CNG',
+            lpg: 'LPG',
+          };
+          const fuelType = fuelTypeMap[fuelTypeAttr] || fuelTypeAttr;
+
+          // Extract title from DOM elements
+          const titleBold = this.cleanText(
             $element.find('.ListItem_title_bold__iQJRq').text(),
           );
-
-          // Extract price
-          const priceText = $element
-            .find('.Price_price__APlgs')
-            .text()
-            .replace(/[^\d]/g, '');
-          const price = priceText ? parseInt(priceText, 10) : undefined;
-
-          // Extract mileage
-          const mileageText = $element
-            .find('[data-testid="VehicleDetails-mileage_road"]')
-            .text()
-            .replace(/[^\d]/g, '');
-          const mileage = mileageText ? parseInt(mileageText, 10) : undefined;
-
-          // Extract year
-          const yearText = $element
-            .find('[data-testid="VehicleDetails-calendar"]')
-            .text();
-          const yearMatch = yearText.match(/(\d{4})/);
-          const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
-
-          // Extract fuel type
-          const fuelType = this.cleanText(
-            $element.find('[data-testid="VehicleDetails-gas_pump"]').text(),
+          const titleVersion = this.cleanText(
+            $element.find('.ListItem_version__5EWfi').text(),
           );
+          const title = `${titleBold} ${titleVersion}`.trim();
 
-          // Extract seller name and location
+          // Extract seller information
+          const sellerName = this.cleanText(
+            $element.find('[data-testid="sellerinfo-company-name"]').text(),
+          );
           const location = this.cleanText(
             $element.find('[data-testid="sellerinfo-address"]').text(),
           );
 
-          // Extract externalId from url (use last part of URL or guid)
-          const externalId =
-            $element.attr('data-guid') ||
-            url.split('-').pop()?.split('?')[0] ||
-            null;
-          if (!externalId) continue;
+          // Extract location from data attribute as fallback
+          const zipCode = $element.attr('data-listing-zip-code');
+          const finalLocation = location || zipCode || undefined;
 
-          // Phone number: scrape from detail page
-          let sellerPhone = null;
+          // Determine seller type from data attribute
+          const sellerTypeAttr = $element.attr('data-seller-type');
+          const sellerType =
+            sellerTypeAttr === 'p'
+              ? SellerType.PRIVATE
+              : sellerTypeAttr === 'd'
+                ? SellerType.DEALER
+                : SellerType.UNKNOWN;
+
+          // Get detail URL by clicking on title (since it uses JS routing)
+          let detailUrl = null;
           try {
-            const detailedInfo = await this.scrapeDetailedListing(url);
-            sellerPhone = detailedInfo.sellerPhone;
+            // Try to find existing href first
+            const existingHref = $element
+              .find('.ListItem_title__ndA4s')
+              .attr('href');
+            if (existingHref) {
+              detailUrl = existingHref.startsWith('http')
+                ? existingHref
+                : `https://www.autoscout24.com${existingHref}`;
+            } else {
+              // If no href, construct URL from data attributes
+              detailUrl = `https://www.autoscout24.com/offers/${make}-${model}-${externalId}`;
+            }
           } catch (error) {
             this.logger.debug(
-              `Failed to get phone for ${url}: ${error.message}`,
+              `Could not extract detail URL for ${externalId}: ${error.message}`,
             );
+            // Fallback URL construction
+            detailUrl = `https://www.autoscout24.com/offers/${make}-${model}-${externalId}`;
           }
 
           // Check if listing already exists in database
@@ -145,69 +171,121 @@ export class AutoScoutScraperService
             continue;
           }
 
+          // Get phone number from detail page
+          let sellerPhone = null;
+          try {
+            const detailedInfo = await this.scrapeDetailedListing(detailUrl);
+            sellerPhone = detailedInfo.sellerPhone;
+          } catch (error) {
+            this.logger.debug(
+              `Failed to get phone for ${detailUrl}: ${error.message}`,
+            );
+          }
+
           // Create and save listing
           const listing = this.listingRepository.create({
             externalId,
             source: ListingSource.AUTOSCOUT,
-            url,
-            title,
-            price: price !== undefined && Number(price),
+            url: detailUrl,
+            title: title || `${make} ${model}`.trim(),
+            price: price !== undefined ? Number(price) : undefined,
             currency: 'EUR',
-            make: undefined,
-            model: undefined,
+            make: make ? this.capitalizeFirst(make) : undefined,
+            model: model ? this.capitalizeFirst(model) : undefined,
             year,
             mileage,
             fuelType,
-            location,
-            sellerType: SellerType.UNKNOWN,
+            location: finalLocation,
+            sellerType,
+            sellerName,
             sellerPhone,
             status: ListingStatus.NEW,
             rawData: {
               scrapedAt: new Date(),
               html: $element.html(),
+              dataAttributes: {
+                guid: externalId,
+                price: priceAttr,
+                make,
+                model,
+                mileage: mileageAttr,
+                year: yearAttr,
+                fuelType: fuelTypeAttr,
+                sellerType: sellerTypeAttr,
+                zipCode,
+              },
             },
           });
 
           const savedListing = await this.listingRepository.save(listing);
           this.logger.log(
-            `Saved listing: ${savedListing.title} (${savedListing.sellerPhone || 'no phone'})`,
+            `Saved listing: ${savedListing.title} (€${savedListing.price || 'N/A'}) - ${savedListing.sellerPhone || 'no phone'}`,
           );
 
           listings.push({
             externalId,
             source: ListingSource.AUTOSCOUT,
-            url,
-            title,
-            price: price !== undefined && Number(price),
+            url: detailUrl,
+            title: title || `${make} ${model}`.trim(),
+            price: price !== undefined ? Number(price) : undefined,
             currency: 'EUR',
-            make: undefined,
-            model: undefined,
+            make: make ? this.capitalizeFirst(make) : undefined,
+            model: model ? this.capitalizeFirst(model) : undefined,
             year,
             mileage,
             fuelType,
-            location,
-            sellerType: SellerType.UNKNOWN,
+            location: finalLocation,
+            sellerType,
+            sellerName,
             sellerPhone,
             rawData: {
               scrapedAt: new Date(),
               html: $element.html(),
+              dataAttributes: {
+                guid: externalId,
+                price: priceAttr,
+                make,
+                model,
+                mileage: mileageAttr,
+                year: yearAttr,
+                fuelType: fuelTypeAttr,
+                sellerType: sellerTypeAttr,
+                zipCode,
+              },
             },
           });
+          if (page && !page.isClosed()) {
+            await page.close();
+            this.logger.debug('Page closed in finally block');
+          }
         } catch (error) {
           this.logger.error(`Error processing listing: ${error.message}`);
           this.logger.error(`Error stack: ${error.stack}`);
+          if (page && !page.isClosed()) {
+            await page.close();
+            this.logger.debug('Page closed in finally block');
+          }
         }
       }
 
-      // ...existing code...
-
       await page.close();
-      this.logger.log(`Scraped ${listings.length} listings from otomoto`);
-    } catch (error) {
-      this.logger.error(`Error scraping otomoto: ${error.message}`);
+      this.logger.log(`Scraped ${listings.length} listings from AutoScout24`);
+    } catch (processingError) {
+      this.logger.error(
+        `Error during scraping process: ${processingError.message}`,
+      );
+      throw processingError;
+    } finally {
+      // Ensure page is always closed, even if there was an error
     }
 
     return listings;
+  }
+
+  // Helper method to add to your class
+  private capitalizeFirst(str) {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
 
   private extractIdFromUrl(url: string): string | null {
@@ -440,7 +518,7 @@ export class AutoScoutScraperService
           const span = await button.$('span');
           if (span) {
             const spanText = await page.evaluate((el) => el.textContent, span);
-            if (spanText && spanText.includes('Показати номер')) {
+            if (spanText && spanText.includes('Show number')) {
               showNumberButton = button;
               break;
             }
