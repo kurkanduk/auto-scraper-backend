@@ -9,6 +9,7 @@ async function bootstrap() {
       'https://auto-bot-frontend.vercel.app',
       'http://localhost:5173',
       'http://194.163.167.191:3003',
+      'http://194.163.167.191:5173',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
