@@ -12,7 +12,7 @@ export abstract class BaseScraperService {
       const executablePath = this.getChromePath();
 
       this.browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         executablePath: executablePath,
         args: [
           '--no-sandbox',
