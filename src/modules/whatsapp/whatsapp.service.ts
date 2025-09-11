@@ -109,7 +109,7 @@ export class WhatsappService implements OnModuleInit {
     }
 
     try {
-      await this.client.sendMessage(chatId, message);
+      await this.sendMessageWithRetry(testNumber, message);
       this.logger.log(`Test message sent to ${testNumber}`);
       return true;
     } catch (error) {
@@ -118,6 +118,62 @@ export class WhatsappService implements OnModuleInit {
       );
       return false;
     }
+  }
+
+  private async sendMessageWithRetry(
+    number: string,
+    message: string,
+    maxRetries: number = 3,
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      this.logger.log(`Send attempt ${attempt}/${maxRetries}`);
+
+      try {
+        // Method 1: Standard chatId format
+        const chatId = this.formatPhoneNumber(number) + '@c.us';
+        await this.client.sendMessage(chatId, message);
+        this.logger.log(`Method 1 successful: ${chatId}`);
+        return true;
+      } catch (error1) {
+        this.logger.warn(`Method 1 failed: ${error1.message}`);
+
+        try {
+          // Method 2: Get number ID first
+          const numberId = await this.client.getNumberId(number);
+          if (numberId && numberId.user) {
+            const chatId2 = `${numberId.user}@c.us`;
+            await this.client.sendMessage(chatId2, message);
+            this.logger.log(`Method 2 successful: ${chatId2}`);
+            return true;
+          }
+        } catch (error2) {
+          this.logger.warn(`Method 2 failed: ${error2.message}`);
+        }
+
+        try {
+          // Method 3: Direct number without country code manipulation
+          await this.client.sendMessage(`${number}@c.us`, message);
+          this.logger.log(`Method 3 successful`);
+          return true;
+        } catch (error3) {
+          this.logger.warn(`Method 3 failed: ${error3.message}`);
+        }
+
+        if (attempt < maxRetries) {
+          this.logger.log(`Waiting before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, 3000 * attempt));
+
+          // Check if we're still connected
+          const state = await this.client.getState();
+          if (state !== 'CONNECTED') {
+            this.logger.error(`Client disconnected. State: ${state}`);
+            break;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   private setupEventHandlers() {
