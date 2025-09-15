@@ -9,12 +9,14 @@ import { BazosScraperService } from './services/bazos-scraper.service';
 import { FilteringModule } from '../filtering/filtering.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AutoScoutScraperService } from './services/auto-scout.service';
+import { MessagePoolModule } from '../message-pull/message-pull.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Listing, ContactLog]),
     FilteringModule,
     WhatsappModule,
+    MessagePoolModule,
   ],
   providers: [
     ScrapingService,

@@ -5,9 +5,10 @@ import { FilteringService } from '../modules/filtering/filtering.service';
 import { MobileDeScraperService } from '../modules/scraping/services/mobile-de-scraper.service';
 import { BazosScraperService } from '../modules/scraping/services/bazos-scraper.service';
 import { OtomotoScraperService } from '../modules/scraping/services/otomoto-scraper.service';
-import { MessagingCronService } from 'src/modules/whatsapp/whatsapp-messaging-cron.service';
 import { AutoScoutScraperService } from 'src/modules/scraping/services/auto-scout.service';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { MessagePoolService } from 'src/modules/message-pull/message-pull.service';
+import { ListingSource } from '../entities/listing.entity';
 
 @Controller('scraping')
 export class ScrapingController {
@@ -19,7 +20,7 @@ export class ScrapingController {
     private readonly bazosScraperService: BazosScraperService,
     private readonly otomotoScraperService: OtomotoScraperService,
     private readonly autoscoutScraperService: AutoScoutScraperService,
-    private readonly MessagingCronService: MessagingCronService,
+    private readonly messagePoolService: MessagePoolService,
     private schedulerRegistry: SchedulerRegistry,
   ) {}
 
@@ -41,10 +42,10 @@ export class ScrapingController {
 
   @Post('send')
   async send(@Query('limit') limit = 1) {
-    await this.MessagingCronService.startManualSending(Number(limit));
+    // TODO: Implement manual sending logic
     return {
       success: true,
-      message: `Started sending for last ${limit} listings`,
+      message: `Manual sending not implemented yet for ${limit} listings`,
     };
   }
 
@@ -235,17 +236,13 @@ export class ScrapingController {
   }
   @Post('manual-sending')
   async manualSending(@Query('source') source?: string) {
-    try {
-      const result = await this.MessagingCronService.startManualSending();
-      return {
-        success: true,
-        message: result,
-        source: source || 'all',
-        timestamp: new Date(),
-      };
-    } catch {
-      console.log('error');
-    }
+    // TODO: Implement manual sending logic
+    return {
+      success: true,
+      message: 'Manual sending not implemented yet',
+      source: source || 'all',
+      timestamp: new Date(),
+    };
   }
   @Get('test-autoscout')
   async testAutoscout(@Query('limit') limit: string = '1') {
@@ -263,6 +260,39 @@ export class ScrapingController {
     } catch (error) {
       return {
         message: 'Error scraping autoscout.pl',
+        error: error.message,
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  @Get('test-message-pools')
+  async testMessagePools() {
+    try {
+      const otomotoMessages =
+        await this.messagePoolService.getMessagesForSource(
+          ListingSource.OTOMOTO,
+        );
+      const autoScoutMessages =
+        await this.messagePoolService.getMessagesForSource(
+          ListingSource.AUTOSCOUT,
+        );
+
+      return {
+        message: 'Message pools test completed',
+        otomoto: {
+          count: otomotoMessages.length,
+          messages: otomotoMessages,
+        },
+        autoScout: {
+          count: autoScoutMessages.length,
+          messages: autoScoutMessages,
+        },
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        message: 'Error testing message pools',
         error: error.message,
         timestamp: new Date(),
       };

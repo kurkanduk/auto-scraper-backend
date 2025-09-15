@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ListingSource } from './listing.entity';
 
 @Entity('message_pool')
 export class MessagePool {
@@ -13,6 +14,13 @@ export class MessagePool {
 
   @Column({ type: 'text' })
   content: string;
+
+  @Column({
+    type: 'simple-enum',
+    enum: ListingSource,
+    default: ListingSource.OTOMOTO,
+  })
+  source: ListingSource;
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;

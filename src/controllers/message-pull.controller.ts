@@ -7,6 +7,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   NotFoundException,
 } from '@nestjs/common';
 import { MessagePoolService } from '../modules/message-pull/message-pull.service';
@@ -14,14 +15,23 @@ import {
   CreateMessageDto,
   UpdateMessageDto,
 } from '../modules/message-pull/message-pull.dto';
+import { ListingSource } from '../entities/listing.entity';
 
 @Controller('message-pool')
 export class MessagePoolController {
   constructor(private readonly service: MessagePoolService) {}
 
   @Get()
-  findAll() {
+  findAll(@Query('source') source?: ListingSource) {
+    if (source) {
+      return this.service.findBySource(source);
+    }
     return this.service.findAll();
+  }
+
+  @Get('source/:source')
+  async findBySource(@Param('source') source: ListingSource) {
+    return this.service.findBySource(source);
   }
 
   @Get(':id')

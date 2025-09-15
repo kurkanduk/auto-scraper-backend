@@ -3,11 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
-import { Listing } from '../../entities/listing.entity';
+import { Listing, ListingSource } from '../../entities/listing.entity';
 import { ContactLog, ContactStatus } from '../../entities/contact-log.entity';
 
 import { defaultConfig } from '../../config/app.config';
 import { MessagePool } from 'src/entities/message-pull.entity';
+import { MessagePoolService } from '../message-pull/message-pull.service';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -19,8 +20,8 @@ export class WhatsappService implements OnModuleInit {
     process.env.WHATSAPP_DISABLED === 'true';
   private messageQueue: Array<{
     listing: Listing;
-    resolve: Function;
-    reject: Function;
+    resolve: (value: boolean) => void;
+    reject: (reason?: any) => void;
   }> = [];
   private messageSentCount = 0;
   private lastHourReset = new Date();
@@ -30,6 +31,7 @@ export class WhatsappService implements OnModuleInit {
     private contactLogRepository: Repository<ContactLog>,
     @InjectRepository(MessagePool)
     private MessagesPool: Repository<MessagePool>,
+    private messagePoolService: MessagePoolService,
   ) {
     this.initializeClient();
   }
@@ -86,6 +88,7 @@ export class WhatsappService implements OnModuleInit {
       process.env.CHROME_PATH, // Custom path from environment
     ];
 
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
     for (const path of possiblePaths) {
       if (path && fs.existsSync(path)) {
@@ -100,7 +103,6 @@ export class WhatsappService implements OnModuleInit {
 
   async sendTestMessage(): Promise<boolean> {
     const testNumber = '+421950242008';
-    const chatId = this.formatPhoneNumber(testNumber) + '@c.us';
     const message = '✅ This is a test message from WhatsappService';
 
     if (this.isDevelopmentMode) {
@@ -292,16 +294,16 @@ export class WhatsappService implements OnModuleInit {
 
       let messages: string[] = [];
       try {
-        messages = await this.getMessagesFromDB();
+        messages = await this.getMessagesFromDB(listing.source);
       } catch (dbError) {
         this.logger.warn(
-          `Failed to fetch messages from DB: ${dbError.message}`,
+          `Failed to fetch messages from DB for source ${listing.source}: ${dbError.message}`,
         );
       }
 
       if (!messages || messages.length === 0) {
         messages = this.testMessages;
-        this.logger.log('Using fallback messages');
+        this.logger.log(`Using fallback messages for source ${listing.source}`);
       }
 
       const message = messages[Math.floor(Math.random() * messages.length)];
@@ -318,16 +320,15 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  private async getMessagesFromDB(): Promise<string[]> {
+  private async getMessagesFromDB(source: ListingSource): Promise<string[]> {
     try {
-      const messages = await this.MessagesPool.find({
-        where: { isActive: true },
-        select: ['content'],
-      });
-
-      return messages.map((m) => m.content);
+      const messages =
+        await this.messagePoolService.getMessagesForSource(source);
+      return messages;
     } catch (error) {
-      this.logger.error(`Failed to fetch messages from DB: ${error.message}`);
+      this.logger.error(
+        `Failed to fetch messages from DB for source ${source}: ${error.message}`,
+      );
       return [];
     }
   }
