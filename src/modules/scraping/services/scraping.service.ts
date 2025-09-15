@@ -135,21 +135,10 @@ export class ScrapingService {
         }
       }
 
-      // Send WhatsApp message
-      const messageSent = await this.whatsappService.sendMessage(listing);
-
-      if (messageSent) {
-        listing.status = ListingStatus.CONTACTED;
-        listing.contactedAt = new Date();
-        this.logger.log(`WhatsApp message sent for listing: ${listing.title}`);
-      } else {
-        listing.status = ListingStatus.PROCESSED;
-        this.logger.warn(
-          `Failed to send WhatsApp message for listing: ${listing.title}`,
-        );
-      }
-
+      // Mark as ready for messaging (will be sent by cron)
+      listing.status = ListingStatus.PROCESSED;
       await this.listingRepository.save(listing);
+      this.logger.log(`Listing ready for messaging: ${listing.title}`);
     } catch (error) {
       this.logger.error(
         `Error processing new listing ${listing.id}: ${error.message}`,
@@ -215,6 +204,18 @@ export class ScrapingService {
       order: { createdAt: 'DESC' },
       take: limit,
     });
+  }
+
+  async getNewListings(limit: number = 10): Promise<Listing[]> {
+    return this.listingRepository.find({
+      where: { status: ListingStatus.PROCESSED },
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
+
+  async updateListingStatus(listing: Listing): Promise<void> {
+    await this.listingRepository.save(listing);
   }
 
   async getAllListings(): Promise<Listing[]> {

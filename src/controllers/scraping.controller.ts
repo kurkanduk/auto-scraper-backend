@@ -42,7 +42,7 @@ export class ScrapingController {
 
   @Post('send')
   async send(@Query('limit') limit = 1) {
-    // TODO: Implement manual sending logic
+    // TODO: Implement manual sending logic using MessagingCronService
     return {
       success: true,
       message: `Manual sending not implemented yet for ${limit} listings`,

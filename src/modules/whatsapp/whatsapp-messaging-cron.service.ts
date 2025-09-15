@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ScrapingService } from '../scraping/services/scraping.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { ListingStatus } from '../../entities/listing.entity';
 
 @Injectable()
 export class MessagingCronService {
@@ -17,23 +18,47 @@ export class MessagingCronService {
     const now = new Date();
     const hour = now.getHours();
 
+    // ✅ Правильная проверка рабочего времени с выходом
     if (hour < 9 || hour >= 20) {
-      this.logger.log('⏸️ Outside working hours, skipping messages');
+      this.logger.log(
+        '⏸️ Outside working hours (9:00-20:00), skipping messages',
+      );
+      return;
     }
 
-    const listings = await this.scrapingService.getRecentListings(limit);
+    // ✅ Получаем только новые объявления (статус PROCESSED)
+    const listings = await this.scrapingService.getNewListings(limit);
+
+    if (listings.length === 0) {
+      this.logger.log('📭 No new listings to process');
+      return;
+    }
+
+    this.logger.log(
+      `📤 Processing ${listings.length} new listings for messaging`,
+    );
 
     for (const listing of listings) {
-      const delay = Math.floor(Math.random() * 10 * 60 * 1000);
-
-      setTimeout(async () => {
+      try {
+        // ✅ Отправляем без случайных задержек
         const ok = await this.whatsappService.sendMessage(listing);
         if (ok) {
+          // ✅ Обновляем статус на CONTACTED
+          listing.status = ListingStatus.CONTACTED;
+          listing.contactedAt = new Date();
+          await this.scrapingService.updateListingStatus(listing);
           this.logger.log(`✅ Message sent for listing: ${listing.title}`);
         } else {
           this.logger.warn(`⚠️ Failed to send message for ${listing.title}`);
         }
-      }, delay);
+
+        // ✅ Небольшая задержка между сообщениями (5 секунд)
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      } catch (error) {
+        this.logger.error(
+          `❌ Error sending message for ${listing.title}: ${error.message}`,
+        );
+      }
     }
   }
 
