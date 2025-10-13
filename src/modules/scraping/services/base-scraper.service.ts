@@ -45,13 +45,14 @@ export abstract class BaseScraperService {
   }
 
   private getChromePath(): string | undefined {
-    // Try to use system Chrome first, then fall back to Puppeteer's Chrome
+    // Prioritize Linux paths for production, then macOS for development
     const possiblePaths = [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
-      '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
-      '/usr/bin/google-chrome', // Linux
-      '/usr/bin/chromium-browser', // Linux Chromium
-      process.env.CHROME_PATH, // Custom path from environment
+      process.env.CHROME_PATH, // Custom path from environment (highest priority)
+      '/usr/bin/chromium-browser', // Linux Chromium (production)
+      '/usr/bin/google-chrome', // Linux Chrome (production)
+      '/usr/bin/chromium', // Alternative Linux path
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS (dev)
+      '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium (dev)
     ];
 
     const fs = require('fs');
