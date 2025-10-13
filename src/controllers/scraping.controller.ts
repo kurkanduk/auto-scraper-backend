@@ -8,6 +8,7 @@ import { OtomotoScraperService } from '../modules/scraping/services/otomoto-scra
 import { AutoScoutScraperService } from 'src/modules/scraping/services/auto-scout.service';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { MessagePoolService } from 'src/modules/message-pull/message-pull.service';
+import { MessagingCronService } from '../modules/whatsapp/whatsapp-messaging-cron.service';
 import { ListingSource } from '../entities/listing.entity';
 
 @Controller('scraping')
@@ -21,6 +22,7 @@ export class ScrapingController {
     private readonly otomotoScraperService: OtomotoScraperService,
     private readonly autoscoutScraperService: AutoScoutScraperService,
     private readonly messagePoolService: MessagePoolService,
+    private readonly messagingCronService: MessagingCronService,
     private schedulerRegistry: SchedulerRegistry,
   ) {}
 
@@ -99,6 +101,42 @@ export class ScrapingController {
   async sendTestMessage() {
     const res = await this.whatsappService.sendTestMessage();
     return res;
+  }
+
+  @Get('whatsapp/qr-code')
+  async getWhatsAppQrCode() {
+    const qrCode = this.whatsappService.getQrCode();
+    const isAuthenticating = this.whatsappService.isWaitingForAuth();
+    const clientInfo = await this.whatsappService.getClientInfo();
+
+    if (!qrCode && !clientInfo.ready) {
+      return {
+        message: 'WhatsApp is not ready. QR code not available yet.',
+        isAuthenticating,
+        ready: false,
+      };
+    }
+
+    if (clientInfo.ready) {
+      return {
+        message: 'WhatsApp is already authenticated',
+        ready: true,
+        info: clientInfo.info,
+      };
+    }
+
+    return {
+      message: 'Scan this QR code with WhatsApp',
+      qrCode,
+      isAuthenticating,
+      ready: false,
+    };
+  }
+
+  @Get('whatsapp/status')
+  async getWhatsAppStatus() {
+    const clientInfo = await this.whatsappService.getClientInfo();
+    return clientInfo;
   }
 
   @Get('test-filter')
@@ -235,14 +273,27 @@ export class ScrapingController {
     }
   }
   @Post('manual-sending')
-  async manualSending(@Query('source') source?: string) {
-    // TODO: Implement manual sending logic
-    return {
-      success: true,
-      message: 'Manual sending not implemented yet',
-      source: source || 'all',
-      timestamp: new Date(),
-    };
+  async manualSending(@Query('limit') limit?: string) {
+    try {
+      const limitNum = limit ? parseInt(limit) : 3;
+
+      // Call the messaging cron service to manually send messages
+      await this.messagingCronService.startManualSending(limitNum);
+
+      return {
+        success: true,
+        message: `Manual sending triggered for ${limitNum} listings`,
+        limit: limitNum,
+        note: 'Messages will be sent with 15-45 second delays between each',
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        timestamp: new Date(),
+      };
+    }
   }
   @Get('test-autoscout')
   async testAutoscout(@Query('limit') limit: string = '1') {
@@ -293,6 +344,44 @@ export class ScrapingController {
     } catch (error) {
       return {
         message: 'Error testing message pools',
+        error: error.message,
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  @Get('debug-otomoto-html')
+  async debugOtomotoHtml() {
+    try {
+      // This endpoint will help us see what the current HTML structure looks like
+      const result = await this.otomotoScraperService.debugHtmlStructure();
+      return {
+        success: true,
+        ...result,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  @Get('reprocess-new')
+  async reprocessNewListings() {
+    try {
+      const result = await this.scrapingService.reprocessNewListings();
+      return {
+        success: true,
+        message: `Reprocessed ${result.processed} listings`,
+        ...result,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
         error: error.message,
         timestamp: new Date(),
       };

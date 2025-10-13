@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
+import * as QRCode from 'qrcode';
 import { Listing, ListingSource } from '../../entities/listing.entity';
 import { ContactLog, ContactStatus } from '../../entities/contact-log.entity';
 
@@ -15,6 +16,8 @@ export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
   private client: Client;
   private isReady = false;
+  private qrCodeDataUrl: string | null = null;
+  private isAuthenticating = false;
   private isDevelopmentMode =
     process.env.NODE_ENV === 'development' ||
     process.env.WHATSAPP_DISABLED === 'true';
@@ -25,6 +28,9 @@ export class WhatsappService implements OnModuleInit {
   }> = [];
   private messageSentCount = 0;
   private lastHourReset = new Date();
+  private dailyMessageCount = 0;
+  private lastDayReset = new Date();
+  private isProcessingQueue = false;
 
   constructor(
     @InjectRepository(ContactLog)
@@ -49,12 +55,14 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async initializeClient() {
+    const chromePath = this.getChromePath();
+
     this.client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'car-scraper-bot',
       }),
       puppeteer: {
-        executablePath: '/usr/bin/chromium-browser',
+        executablePath: chromePath,
         headless: true,
         timeout: 60000,
         args: [
@@ -84,7 +92,7 @@ export class WhatsappService implements OnModuleInit {
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
       '/Applications/Chromium.app/Contents/MacOS/Chromium', // macOS Chromium
       '/usr/bin/google-chrome', // Linux
-      '', // Linux Chromium
+      '/usr/bin/chromium-browser', // Linux Chromium
       process.env.CHROME_PATH, // Custom path from environment
     ];
 
@@ -92,12 +100,12 @@ export class WhatsappService implements OnModuleInit {
     const fs = require('fs');
     for (const path of possiblePaths) {
       if (path && fs.existsSync(path)) {
-        this.logger.log(`Using Chrome at: ${path}`);
+        this.logger.log(`WhatsApp using Chrome at: ${path}`);
         return path;
       }
     }
 
-    this.logger.log('Using Puppeteer bundled Chrome');
+    this.logger.log('WhatsApp using Puppeteer bundled Chrome');
     return undefined; // Let Puppeteer use its bundled Chrome
   }
 
@@ -179,28 +187,47 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private setupEventHandlers() {
-    this.client.on('qr', (qr) => {
+    this.client.on('qr', async (qr) => {
       this.logger.log('QR Code received, scan with WhatsApp:');
       qrcode.generate(qr);
+
+      // Generate QR code as base64 data URL for frontend
+      try {
+        this.qrCodeDataUrl = await QRCode.toDataURL(qr, {
+          width: 400,
+          margin: 2,
+        });
+        this.isAuthenticating = true;
+        this.logger.log('QR Code image generated and ready for frontend');
+      } catch (error) {
+        this.logger.error('Failed to generate QR code image:', error.message);
+      }
     });
 
     this.client.on('ready', () => {
       this.logger.log('WhatsApp client is ready!');
       this.isReady = true;
+      this.isAuthenticating = false;
+      this.qrCodeDataUrl = null; // Clear QR code after authentication
       this.processMessageQueue();
     });
 
     this.client.on('authenticated', () => {
       this.logger.log('WhatsApp client authenticated');
+      this.isAuthenticating = false;
+      this.qrCodeDataUrl = null; // Clear QR code after authentication
     });
 
     this.client.on('auth_failure', (msg) => {
       this.logger.error('WhatsApp authentication failed:', msg);
+      this.isAuthenticating = false;
+      this.qrCodeDataUrl = null;
     });
 
     this.client.on('disconnected', (reason) => {
       this.logger.warn('WhatsApp client disconnected:', reason);
       this.isReady = false;
+      this.isAuthenticating = false;
     });
 
     this.client.on('message_create', (message) => {
@@ -256,28 +283,54 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async processMessageQueue() {
-    while (this.messageQueue.length > 0 && this.isReady) {
-      const { listing, resolve, reject } = this.messageQueue.shift()!;
+    // Prevent concurrent queue processing
+    if (this.isProcessingQueue) {
+      this.logger.debug('Queue is already being processed, skipping...');
+      return;
+    }
 
-      try {
-        // Check rate limiting
+    this.isProcessingQueue = true;
 
-        const success = await this.sendWhatsAppMessage(listing);
-        resolve(success);
+    try {
+      while (this.messageQueue.length > 0 && this.isReady) {
+        const { listing, resolve, reject } = this.messageQueue.shift()!;
 
-        if (success) {
-          this.messageSentCount++;
+        try {
+          // Check rate limiting before sending
+          if (!this.canSendMessage()) {
+            this.logger.warn('⚠️ Rate limit reached, message queued for later');
+            this.messageQueue.unshift({ listing, resolve, reject });
+            break;
+          }
+
+          const success = await this.sendWhatsAppMessage(listing);
+          resolve(success);
+
+          if (success) {
+            this.messageSentCount++;
+            this.dailyMessageCount++;
+          }
+
+          // Random delay between messages (15-45 seconds) to avoid spam detection
+          // Only delay if there are more messages in queue
+          if (this.messageQueue.length > 0) {
+            const minDelay = defaultConfig.whatsapp.minDelaySeconds * 1000;
+            const maxDelay = defaultConfig.whatsapp.maxDelaySeconds * 1000;
+            const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+
+            this.logger.log(`⏱️ Waiting ${(randomDelay / 1000).toFixed(1)}s before next message`);
+            await this.delay(randomDelay);
+          }
+        } catch (error) {
+          this.logger.error(
+            `Error sending message for listing ${listing.id}:`,
+            error,
+          );
+          reject(error);
         }
-
-        // Add delay between messages to avoid spam detection
-        await this.delay(5000);
-      } catch (error) {
-        this.logger.error(
-          `Error sending message for listing ${listing.id}:`,
-          error,
-        );
-        reject(error);
       }
+    } finally {
+      this.isProcessingQueue = false;
     }
   }
   private testMessages = [
@@ -388,15 +441,37 @@ export class WhatsappService implements OnModuleInit {
 
   private canSendMessage(): boolean {
     const now = new Date();
+
+    // Reset hourly counter
     const hoursSinceReset =
       (now.getTime() - this.lastHourReset.getTime()) / (1000 * 60 * 60);
-
     if (hoursSinceReset >= 1) {
       this.messageSentCount = 0;
       this.lastHourReset = now;
+      this.logger.log('🔄 Hourly message counter reset');
     }
 
-    return this.messageSentCount < defaultConfig.whatsapp.maxMessagesPerHour;
+    // Reset daily counter
+    const daysSinceReset =
+      (now.getTime() - this.lastDayReset.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceReset >= 1) {
+      this.dailyMessageCount = 0;
+      this.lastDayReset = now;
+      this.logger.log('🔄 Daily message counter reset');
+    }
+
+    // Check both hourly and daily limits
+    const hourlyOk = this.messageSentCount < defaultConfig.whatsapp.maxMessagesPerHour;
+    const dailyOk = this.dailyMessageCount < defaultConfig.whatsapp.maxMessagesPerDay;
+
+    if (!hourlyOk) {
+      this.logger.warn(`⚠️ Hourly limit reached: ${this.messageSentCount}/${defaultConfig.whatsapp.maxMessagesPerHour}`);
+    }
+    if (!dailyOk) {
+      this.logger.warn(`⚠️ Daily limit reached: ${this.dailyMessageCount}/${defaultConfig.whatsapp.maxMessagesPerDay}`);
+    }
+
+    return hourlyOk && dailyOk;
   }
 
   private delay(ms: number): Promise<void> {
@@ -411,11 +486,17 @@ export class WhatsappService implements OnModuleInit {
         info: { pushname: 'Development Mode', platform: 'dev' },
         queueSize: this.messageQueue.length,
         messagesSentThisHour: this.messageSentCount,
+        messagesSentToday: this.dailyMessageCount,
       };
     }
 
     if (!this.isReady) {
-      return { ready: false, info: null };
+      return {
+        ready: false,
+        info: null,
+        isAuthenticating: this.isAuthenticating,
+        hasQrCode: !!this.qrCodeDataUrl,
+      };
     }
 
     try {
@@ -429,10 +510,26 @@ export class WhatsappService implements OnModuleInit {
         },
         queueSize: this.messageQueue.length,
         messagesSentThisHour: this.messageSentCount,
+        messagesSentToday: this.dailyMessageCount,
+        isAuthenticating: false,
+        hasQrCode: false,
       };
     } catch (error) {
-      return { ready: false, error: error.message };
+      return {
+        ready: false,
+        error: error.message,
+        isAuthenticating: this.isAuthenticating,
+        hasQrCode: !!this.qrCodeDataUrl,
+      };
     }
+  }
+
+  getQrCode(): string | null {
+    return this.qrCodeDataUrl;
+  }
+
+  isWaitingForAuth(): boolean {
+    return this.isAuthenticating;
   }
 
   async getContactLogs(limit: number = 10): Promise<ContactLog[]> {

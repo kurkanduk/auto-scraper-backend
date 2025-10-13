@@ -14,7 +14,7 @@ export class MessagingCronService {
   ) {}
 
   // Вынесенная логика отправки сообщений
-  private async sendMessagesFromListings(limit = 10) {
+  private async sendMessagesFromListings(limit = 3) {
     const now = new Date();
     const hour = now.getHours();
 
@@ -52,8 +52,7 @@ export class MessagingCronService {
           this.logger.warn(`⚠️ Failed to send message for ${listing.title}`);
         }
 
-        // ✅ Небольшая задержка между сообщениями (5 секунд)
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // Note: Delay is now handled by WhatsApp service with random timing
       } catch (error) {
         this.logger.error(
           `❌ Error sending message for ${listing.title}: ${error.message}`,
@@ -62,10 +61,10 @@ export class MessagingCronService {
     }
   }
 
-  // Крон-запуск
-  @Cron(CronExpression.EVERY_10_MINUTES, { name: 'messages' })
+  // Крон-запуск (changed to every 30 minutes for safety)
+  @Cron(CronExpression.EVERY_30_MINUTES, { name: 'messages' })
   async handleCron() {
-    await this.sendMessagesFromListings(10);
+    await this.sendMessagesFromListings(3); // Reduced from 10 to 3
   }
 
   // Ручной запуск

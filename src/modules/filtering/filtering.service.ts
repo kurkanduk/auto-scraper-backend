@@ -16,6 +16,25 @@ export class FilteringService {
   async shouldContact(listing: Listing): Promise<FilterResult> {
     this.logger.debug(`Filtering listing: ${listing.title}`);
 
+    // ⚠️ FILTERING DISABLED - All listings will be processed
+    // Just check if we have a phone number, nothing else
+    if (!listing.sellerPhone) {
+      return {
+        shouldContact: false,
+        reason: 'No phone number available',
+        needsMoreDetails: true,
+      };
+    }
+
+    // Skip all other filters and approve the listing
+    this.logger.debug(`✅ Listing approved (filtering disabled): ${listing.title}`);
+    return {
+      shouldContact: true,
+      reason: 'Approved - filtering disabled',
+    };
+
+    /* FILTERS DISABLED - Original code below:
+
     // 1. Check if it's from a private seller
     if (listing.sellerType !== SellerType.PRIVATE) {
       return {
@@ -143,6 +162,7 @@ export class FilteringService {
       shouldContact: true,
       reason: 'All filters passed',
     };
+    */
   }
 
   private performQualityChecks(listing: Listing): FilterResult {

@@ -15,6 +15,9 @@ export interface AppConfig {
   whatsapp: {
     messageTemplate: string;
     maxMessagesPerHour: number;
+    maxMessagesPerDay: number;
+    minDelaySeconds: number;
+    maxDelaySeconds: number;
   };
 }
 
@@ -38,6 +41,9 @@ export const defaultConfig: AppConfig = {
 Ссылка на объявление: {url}
 
 Спасибо!`,
-    maxMessagesPerHour: 10,
+    maxMessagesPerHour: 5, // Reduced from 10 for safety
+    maxMessagesPerDay: 50, // Daily limit to prevent bans
+    minDelaySeconds: 15, // Minimum 15 seconds between messages
+    maxDelaySeconds: 45, // Maximum 45 seconds (random)
   },
 };

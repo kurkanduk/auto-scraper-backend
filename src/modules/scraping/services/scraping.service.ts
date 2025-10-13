@@ -249,4 +249,32 @@ export class ScrapingService {
       contactRate: total > 0 ? ((contacted / total) * 100).toFixed(2) : 0,
     };
   }
+
+  // Reprocess all listings with NEW status through filtering
+  async reprocessNewListings(): Promise<{ processed: number; errors: number }> {
+    const newListings = await this.listingRepository.find({
+      where: { status: ListingStatus.NEW },
+    });
+
+    this.logger.log(
+      `Reprocessing ${newListings.length} listings with NEW status`,
+    );
+
+    let processed = 0;
+    let errors = 0;
+
+    for (const listing of newListings) {
+      try {
+        await this.processNewListing(listing);
+        processed++;
+      } catch (error) {
+        this.logger.error(
+          `Error reprocessing listing ${listing.id}: ${error.message}`,
+        );
+        errors++;
+      }
+    }
+
+    return { processed, errors };
+  }
 }

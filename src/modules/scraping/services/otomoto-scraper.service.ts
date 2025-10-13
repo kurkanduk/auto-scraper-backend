@@ -32,21 +32,25 @@ export class OtomotoScraperService
   async scrape(): Promise<ScrapedListing[]> {
     this.logger.log('Starting otomoto scraping...');
     const listings: ScrapedListing[] = [];
+    let page;
 
     try {
-      const page = await this.createPage();
+      page = await this.createPage();
 
       // Search URL for cars from private sellers
       const searchUrl =
         'https://www.otomoto.pl/osobowe?search%5Bfilter_float_year%3Afrom%5D=2015&search%5Bfilter_float_price%3Ato%5D=200000&search%5Bprivate_business%5D=private&search%5Border%5D=created_at%3Adesc';
 
-      await page.goto(searchUrl, { waitUntil: 'networkidle2' });
-      await this.delay(3000);
+      await page.goto(searchUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
+      await this.delay(2000);
 
       // Accept cookies if present
       try {
         await page.waitForSelector('[data-testid="cookie-consent-accept"]', {
-          timeout: 5000,
+          timeout: 3000,
         });
         await page.click('[data-testid="cookie-consent-accept"]');
         await this.delay(1000);
@@ -57,13 +61,28 @@ export class OtomotoScraperService
       const content = await page.content();
       const $ = this.loadCheerio(content);
 
-      // Find listing items using the correct Otomoto structure
-      const listingElements = $('section.ooa-ljs66p.e1fi2t0p0')
-        .toArray()
-        .slice(0, 10);
+      // Try multiple selectors to find listings (Otomoto changes their classes frequently)
+      let listingElements: any[] = [];
+      const possibleSelectors = [
+        'article[data-testid="listing-ad"]',
+        'article[data-cy="ad-card"]',
+        'section.ooa-ljs66p.e1fi2t0p0',
+        'article',
+      ];
+
+      for (const selector of possibleSelectors) {
+        listingElements = $(selector).toArray();
+        if (listingElements.length > 0) {
+          this.logger.log(`Found ${listingElements.length} listings using selector: ${selector}`);
+          break;
+        }
+      }
+
+      // Limit to first 10 listings
+      listingElements = listingElements.slice(0, 10);
 
       this.logger.debug(
-        `Found ${listingElements.length} listing elements on page`,
+        `Processing ${listingElements.length} listing elements`,
       );
 
       for (const element of listingElements) {
@@ -71,10 +90,11 @@ export class OtomotoScraperService
         try {
           const $element = $(element);
 
-          // Extract basic info using the correct Otomoto structure
-          const titleElement = $element
-            .find('h2.etydmma0.ooa-iasyan a[href*="/oferta/"]')
-            .first();
+          // Try multiple selectors for title/link
+          let titleElement = $element.find('h2 a[href*="/oferta/"]').first();
+          if (!titleElement.length) {
+            titleElement = $element.find('a[href*="/oferta/"]').first();
+          }
 
           if (!titleElement.length) {
             this.logger.debug(
@@ -127,20 +147,24 @@ export class OtomotoScraperService
           // Extract make and model from title
           const carInfo = this.extractMakeModelFromTitle(title);
 
-          // Phone numbers are only revealed after clicking "Zadzwoń" button
+          // Skip detailed scraping for now to avoid connection issues
+          // We'll add phone numbers in a separate pass or skip them
           let sellerPhone = null;
 
-          // Extract phone number for all listings
-          console.log('scraping detailed listing', url);
-          try {
-            const detailedInfo = await this.scrapeDetailedListing(url);
-            console.log('detailedInfo', detailedInfo);
-            sellerPhone = detailedInfo.sellerPhone;
-            console.log('sellerPhone', sellerPhone);
-          } catch (error) {
-            this.logger.debug(
-              `Failed to get phone for ${url}: ${error.message}`,
-            );
+          // Only scrape details for first 3 listings to avoid overwhelming the browser
+          if (listings.length < 3) {
+            this.logger.debug(`Scraping detailed info for: ${url}`);
+            try {
+              const detailedInfo = await this.scrapeDetailedListing(url);
+              sellerPhone = detailedInfo.sellerPhone;
+              this.logger.debug(`Got phone: ${sellerPhone || 'none'}`);
+            } catch (error) {
+              this.logger.debug(
+                `Failed to get phone for ${url}: ${error.message}`,
+              );
+            }
+          } else {
+            this.logger.debug(`Skipping detailed scrape for: ${url} (limit reached)`);
           }
 
           // Check if listing already exists in database
@@ -208,10 +232,19 @@ export class OtomotoScraperService
         }
       }
 
-      await page.close();
       this.logger.log(`Scraped ${listings.length} listings from otomoto`);
     } catch (error) {
       this.logger.error(`Error scraping otomoto: ${error.message}`);
+      this.logger.error(`Stack: ${error.stack}`);
+    } finally {
+      // Always close the page
+      if (page && !page.isClosed()) {
+        try {
+          await page.close();
+        } catch (closeError) {
+          this.logger.error(`Error closing page: ${closeError.message}`);
+        }
+      }
     }
 
     return listings;
@@ -422,12 +455,12 @@ export class OtomotoScraperService
 
       // Set a shorter timeout for faster failures
       await page.goto(url, {
-        waitUntil: 'domcontentloaded', // Changed from 'networkidle2' for faster loading
-        timeout: 8000, // Reduced from 10000
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
       });
 
       // Reduced initial delay
-      await this.delay(500);
+      await this.delay(1000);
 
       // Extract phone number using original working logic
       let phoneNumber;
@@ -609,5 +642,139 @@ export class OtomotoScraperService
       default:
         return SellerType.UNKNOWN;
     }
+  }
+
+  async debugHtmlStructure(): Promise<any> {
+    this.logger.log('Debugging Otomoto HTML structure...');
+    const page = await this.createPage();
+
+    try {
+      const searchUrl =
+        'https://www.otomoto.pl/osobowe?search%5Bfilter_float_year%3Afrom%5D=2015&search%5Bfilter_float_price%3Ato%5D=200000&search%5Bprivate_business%5D=private&search%5Border%5D=created_at%3Adesc';
+
+      await page.goto(searchUrl, { waitUntil: 'networkidle2' });
+      await this.delay(3000);
+
+      // Accept cookies if present
+      try {
+        await page.waitForSelector('[data-testid="cookie-consent-accept"]', {
+          timeout: 5000,
+        });
+        await page.click('[data-testid="cookie-consent-accept"]');
+        await this.delay(1000);
+      } catch (e) {
+        // No cookies banner
+      }
+
+      const content = await page.content();
+      const $ = this.loadCheerio(content);
+
+      // Try different selectors to find listings
+      const possibleSelectors = [
+        'article[data-testid="listing-ad"]',
+        'article[data-testid*="ad"]',
+        'article[data-cy="ad-card"]',
+        'section[class*="e1fi2t0p"]',
+        'article',
+        '[data-testid^="listing"]',
+        'main article',
+      ];
+
+      const findings: any = {
+        selectorResults: {},
+        firstArticleStructure: null,
+        allArticleClasses: [],
+        linkStructures: [],
+      };
+
+      // Test each selector
+      for (const selector of possibleSelectors) {
+        const elements = $(selector);
+        findings.selectorResults[selector] = {
+          count: elements.length,
+          firstElementHtml:
+            elements.length > 0
+              ? $(elements[0]).html()?.substring(0, 1000)
+              : null,
+        };
+      }
+
+      // Get all articles and their classes
+      $('article').each((i, el) => {
+        const classes = $(el).attr('class');
+        const dataAttrs: any = {};
+        Object.keys(el.attribs || {}).forEach((key) => {
+          if (key.startsWith('data-')) {
+            dataAttrs[key] = el.attribs[key];
+          }
+        });
+
+        findings.allArticleClasses.push({
+          index: i,
+          classes,
+          dataAttributes: dataAttrs,
+        });
+
+        if (i === 0) {
+          findings.firstArticleStructure = {
+            html: $(el).html()?.substring(0, 2000),
+            classes,
+            dataAttributes: dataAttrs,
+          };
+        }
+      });
+
+      // Find all links with /oferta/
+      $('a[href*="/oferta/"]').each((i, el) => {
+        if (i < 5) {
+          // Only first 5
+          const $el = $(el);
+          const href = $el.attr('href');
+          const text = this.cleanText($el.text());
+          const parent = $el.parent();
+          const parentTag = parent.prop('tagName');
+          const parentClasses = parent.attr('class');
+
+          findings.linkStructures.push({
+            href,
+            text: text?.substring(0, 100),
+            parentTag,
+            parentClasses,
+            ancestors: this.getAncestors($el, $),
+          });
+        }
+      });
+
+      await page.close();
+
+      return {
+        message: 'HTML structure analysis complete',
+        findings,
+      };
+    } catch (error) {
+      this.logger.error(`Error debugging HTML structure: ${error.message}`);
+      await page.close();
+      throw error;
+    }
+  }
+
+  private getAncestors($el: any, $: any): string[] {
+    const ancestors: string[] = [];
+    let current = $el.parent();
+    let depth = 0;
+
+    while (current.length > 0 && depth < 5) {
+      const tag = current.prop('tagName');
+      const classes = current.attr('class');
+      const dataAttrs = Object.keys(current[0].attribs || {})
+        .filter((k) => k.startsWith('data-'))
+        .join(', ');
+
+      ancestors.push(`${tag}.${classes || 'no-class'} [${dataAttrs || 'no-data-attrs'}]`);
+      current = current.parent();
+      depth++;
+    }
+
+    return ancestors;
   }
 }
