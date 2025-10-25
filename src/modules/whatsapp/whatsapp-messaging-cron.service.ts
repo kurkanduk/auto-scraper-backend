@@ -40,20 +40,33 @@ export class MessagingCronService {
 
     for (const listing of listings) {
       try {
+        // ✅ Mark as CONTACTED before sending to prevent duplicate sends
+        listing.status = ListingStatus.CONTACTED;
+        listing.contactedAt = new Date();
+        await this.scrapingService.updateListingStatus(listing);
+
         // ✅ Отправляем без случайных задержек
         const ok = await this.whatsappService.sendMessage(listing);
         if (ok) {
-          // ✅ Обновляем статус на CONTACTED
-          listing.status = ListingStatus.CONTACTED;
-          listing.contactedAt = new Date();
-          await this.scrapingService.updateListingStatus(listing);
           this.logger.log(`✅ Message sent for listing: ${listing.title}`);
         } else {
+          // ⚠️ Revert status if send failed
+          listing.status = ListingStatus.PROCESSED;
+          listing.contactedAt = null;
+          await this.scrapingService.updateListingStatus(listing);
           this.logger.warn(`⚠️ Failed to send message for ${listing.title}`);
         }
 
         // Note: Delay is now handled by WhatsApp service with random timing
       } catch (error) {
+        // ⚠️ Revert status on error to allow retry
+        try {
+          listing.status = ListingStatus.PROCESSED;
+          listing.contactedAt = null;
+          await this.scrapingService.updateListingStatus(listing);
+        } catch (revertError) {
+          this.logger.error(`Failed to revert status: ${revertError.message}`);
+        }
         this.logger.error(
           `❌ Error sending message for ${listing.title}: ${error.message}`,
         );

@@ -10,6 +10,8 @@ import { ContactLog, ContactStatus } from '../../entities/contact-log.entity';
 import { defaultConfig } from '../../config/app.config';
 import { MessagePool } from 'src/entities/message-pull.entity';
 import { MessagePoolService } from '../message-pull/message-pull.service';
+import { PhoneFormatter } from './utils/phone-formatter.util';
+import { RateLimiter } from './utils/rate-limiter.util';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -26,11 +28,8 @@ export class WhatsappService implements OnModuleInit {
     resolve: (value: boolean) => void;
     reject: (reason?: any) => void;
   }> = [];
-  private messageSentCount = 0;
-  private lastHourReset = new Date();
-  private dailyMessageCount = 0;
-  private lastDayReset = new Date();
   private isProcessingQueue = false;
+  private rateLimiter: RateLimiter;
 
   constructor(
     @InjectRepository(ContactLog)
@@ -39,6 +38,10 @@ export class WhatsappService implements OnModuleInit {
     private MessagesPool: Repository<MessagePool>,
     private messagePoolService: MessagePoolService,
   ) {
+    this.rateLimiter = new RateLimiter({
+      maxMessagesPerHour: defaultConfig.whatsapp.maxMessagesPerHour,
+      maxMessagesPerDay: defaultConfig.whatsapp.maxMessagesPerDay,
+    });
     this.initializeClient();
   }
 
@@ -110,6 +113,11 @@ export class WhatsappService implements OnModuleInit {
     return undefined; // Let Puppeteer use its bundled Chrome
   }
 
+  /**
+   * Sends a test message to verify WhatsApp connectivity
+   *
+   * @returns Promise<boolean> - True if test message sent successfully
+   */
   async sendTestMessage(): Promise<boolean> {
     const testNumber = '+421950242008';
     const message = '✅ This is a test message from WhatsappService';
@@ -131,17 +139,27 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  /**
+   * Sends a message with automatic retry logic using multiple methods
+   *
+   * @param number - Phone number to send to
+   * @param message - Message text to send
+   * @param maxRetries - Maximum number of retry attempts (default: 3)
+   * @returns Promise<boolean> - True if message sent successfully
+   */
   private async sendMessageWithRetry(
     number: string,
     message: string,
     maxRetries: number = 3,
   ): Promise<boolean> {
+    const retryDelay = 3000; // 3 seconds base delay
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       this.logger.log(`Send attempt ${attempt}/${maxRetries}`);
 
       try {
-        // Method 1: Standard chatId format
-        const chatId = this.formatPhoneNumber(number) + '@c.us';
+        // Method 1: Standard chatId format with formatted number
+        const chatId = PhoneFormatter.toChatId(number);
         await this.client.sendMessage(chatId, message);
         this.logger.log(`Method 1 successful: ${chatId}`);
         return true;
@@ -171,8 +189,9 @@ export class WhatsappService implements OnModuleInit {
         }
 
         if (attempt < maxRetries) {
-          this.logger.log(`Waiting before retry...`);
-          await new Promise((resolve) => setTimeout(resolve, 3000 * attempt));
+          const waitTime = retryDelay * attempt;
+          this.logger.log(`Waiting ${waitTime}ms before retry...`);
+          await this.delay(waitTime);
 
           // Check if we're still connected
           const state = await this.client.getState();
@@ -231,14 +250,7 @@ export class WhatsappService implements OnModuleInit {
       this.isAuthenticating = false;
     });
 
-    this.client.on('message_create', (message) => {
-      // Log received messages for debugging
-      if (!message.fromMe) {
-        this.logger.debug(
-          `Received message from ${message.from}: ${message.body}`,
-        );
-      }
-    });
+    // Removed message_create event handler - no longer logging received messages
   }
 
   private async startClient() {
@@ -259,19 +271,28 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  /**
+   * Queues a WhatsApp message for a listing
+   * In production, adds to queue for processing
+   * In development mode, only logs the action
+   *
+   * @param listing - The listing to send a message about
+   * @returns Promise<boolean> - Resolves when message is sent or queued
+   */
   async sendMessage(listing: Listing): Promise<boolean> {
     if (this.isDevelopmentMode) {
       this.logger.log(
         `[DEV MODE] Would send WhatsApp message to ${listing.sellerPhone} for: ${listing.title}`,
       );
 
-      // Log the contact in development mode
+      // Log the contact in development mode with fallback message
       await this.logContact(
         listing,
         listing.sellerPhone || 'unknown',
-        this.generateMessage(listing),
+        this.testMessages[0],
         ContactStatus.SENT,
       );
+      return true;
     }
 
     return new Promise((resolve, reject) => {
@@ -283,6 +304,10 @@ export class WhatsappService implements OnModuleInit {
     });
   }
 
+  /**
+   * Processes the message queue with rate limiting and delays
+   * Prevents concurrent processing and respects rate limits
+   */
   private async processMessageQueue() {
     // Prevent concurrent queue processing
     if (this.isProcessingQueue) {
@@ -298,7 +323,7 @@ export class WhatsappService implements OnModuleInit {
 
         try {
           // Check rate limiting before sending
-          if (!this.canSendMessage()) {
+          if (!this.rateLimiter.canSendMessage()) {
             this.logger.warn('⚠️ Rate limit reached, message queued for later');
             this.messageQueue.unshift({ listing, resolve, reject });
             break;
@@ -308,8 +333,7 @@ export class WhatsappService implements OnModuleInit {
           resolve(success);
 
           if (success) {
-            this.messageSentCount++;
-            this.dailyMessageCount++;
+            this.rateLimiter.incrementCount();
           }
 
           // Random delay between messages (15-45 seconds) to avoid spam detection
@@ -317,9 +341,12 @@ export class WhatsappService implements OnModuleInit {
           if (this.messageQueue.length > 0) {
             const minDelay = defaultConfig.whatsapp.minDelaySeconds * 1000;
             const maxDelay = defaultConfig.whatsapp.maxDelaySeconds * 1000;
-            const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+            const randomDelay =
+              Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
 
-            this.logger.log(`⏱️ Waiting ${(randomDelay / 1000).toFixed(1)}s before next message`);
+            this.logger.log(
+              `⏱️ Waiting ${(randomDelay / 1000).toFixed(1)}s before next message`,
+            );
             await this.delay(randomDelay);
           }
         } catch (error) {
@@ -338,14 +365,30 @@ export class WhatsappService implements OnModuleInit {
     'Dobrý deň, chcel by som sa opýtať, či je auto stále k dispozícii?',
   ];
 
+  /**
+   * Sends a WhatsApp message to a listing's seller
+   *
+   * @param listing - The listing to contact
+   * @returns Promise<boolean> - True if message sent successfully
+   */
   private async sendWhatsAppMessage(listing: Listing): Promise<boolean> {
     try {
-      const number =
-        listing.source === 'otomoto'
-          ? `+48${listing.sellerPhone}`
-          : listing.sellerPhone;
-      const chatId = `${this.formatPhoneNumber(number)}@c.us`;
+      // Validate phone number
+      if (!PhoneFormatter.isValidPhone(listing.sellerPhone)) {
+        this.logger.warn(
+          `Invalid phone number for listing ${listing.id}: ${listing.sellerPhone}`,
+        );
+        return false;
+      }
 
+      // Add source-specific prefix and format
+      const number = PhoneFormatter.addSourcePrefix(
+        listing.sellerPhone,
+        listing.source,
+      );
+      const chatId = PhoneFormatter.toChatId(number);
+
+      // Fetch messages from database
       let messages: string[] = [];
       try {
         messages = await this.getMessagesFromDB(listing.source);
@@ -355,15 +398,19 @@ export class WhatsappService implements OnModuleInit {
         );
       }
 
+      // Fallback to test messages if none found
       if (!messages || messages.length === 0) {
         messages = this.testMessages;
         this.logger.log(`Using fallback messages for source ${listing.source}`);
       }
 
+      // Select random message from pool
       const message = messages[Math.floor(Math.random() * messages.length)];
 
+      // Send the message
       await this.client.sendMessage(chatId, message);
 
+      // Log the contact
       await this.logContact(listing, number, message, ContactStatus.SENT);
 
       this.logger.log(`Message sent to ${number}: "${message}"`);
@@ -374,6 +421,12 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  /**
+   * Fetches message templates from database for a specific source
+   *
+   * @param source - The listing source to get messages for
+   * @returns Array of message templates
+   */
   private async getMessagesFromDB(source: ListingSource): Promise<string[]> {
     try {
       const messages =
@@ -387,37 +440,15 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  private formatPhoneNumber(phone: string): string {
-    // Remove all non-digit characters
-    let formatted = phone.replace(/\D/g, '');
-
-    // Add country codes if missing
-    if (formatted.startsWith('0')) {
-      // German numbers starting with 0
-      formatted = '49' + formatted.substring(1);
-    } else if (formatted.length === 9 && !formatted.startsWith('48')) {
-      // Polish numbers (9 digits without country code)
-      formatted = '48' + formatted;
-    } else if (formatted.length === 9 && !formatted.startsWith('420')) {
-      // Czech numbers (9 digits without country code)
-      formatted = '420' + formatted;
-    }
-
-    return formatted;
-  }
-
-  private generateMessage(listing: Listing): string {
-    let message = defaultConfig.whatsapp.messageTemplate;
-
-    // Replace placeholders
-    message = message.replace('{make}', listing.make || 'автомобиль');
-    message = message.replace('{model}', listing.model || '');
-    message = message.replace('{year}', listing.year?.toString() || '');
-    message = message.replace('{url}', listing.url);
-
-    return message;
-  }
-
+  /**
+   * Logs a contact attempt to the database
+   *
+   * @param listing - The listing being contacted
+   * @param phoneNumber - The phone number contacted
+   * @param message - The message sent
+   * @param status - Status of the contact attempt
+   * @param errorMessage - Optional error message if failed
+   */
   private async logContact(
     listing: Listing,
     phoneNumber: string,
@@ -440,54 +471,28 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  private canSendMessage(): boolean {
-    const now = new Date();
-
-    // Reset hourly counter
-    const hoursSinceReset =
-      (now.getTime() - this.lastHourReset.getTime()) / (1000 * 60 * 60);
-    if (hoursSinceReset >= 1) {
-      this.messageSentCount = 0;
-      this.lastHourReset = now;
-      this.logger.log('🔄 Hourly message counter reset');
-    }
-
-    // Reset daily counter
-    const daysSinceReset =
-      (now.getTime() - this.lastDayReset.getTime()) / (1000 * 60 * 60 * 24);
-    if (daysSinceReset >= 1) {
-      this.dailyMessageCount = 0;
-      this.lastDayReset = now;
-      this.logger.log('🔄 Daily message counter reset');
-    }
-
-    // Check both hourly and daily limits
-    const hourlyOk = this.messageSentCount < defaultConfig.whatsapp.maxMessagesPerHour;
-    const dailyOk = this.dailyMessageCount < defaultConfig.whatsapp.maxMessagesPerDay;
-
-    if (!hourlyOk) {
-      this.logger.warn(`⚠️ Hourly limit reached: ${this.messageSentCount}/${defaultConfig.whatsapp.maxMessagesPerHour}`);
-    }
-    if (!dailyOk) {
-      this.logger.warn(`⚠️ Daily limit reached: ${this.dailyMessageCount}/${defaultConfig.whatsapp.maxMessagesPerDay}`);
-    }
-
-    return hourlyOk && dailyOk;
-  }
-
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  /**
+   * Gets WhatsApp client status and statistics
+   *
+   * @returns Client info including connection status and message stats
+   */
   async getClientInfo(): Promise<any> {
+    const stats = this.rateLimiter.getStats();
+
     if (this.isDevelopmentMode) {
       return {
         ready: true,
         developmentMode: true,
         info: { pushname: 'Development Mode', platform: 'dev' },
         queueSize: this.messageQueue.length,
-        messagesSentThisHour: this.messageSentCount,
-        messagesSentToday: this.dailyMessageCount,
+        messagesSentThisHour: stats.messagesSentThisHour,
+        messagesSentToday: stats.messagesSentToday,
+        hourlyLimit: stats.hourlyLimit,
+        dailyLimit: stats.dailyLimit,
       };
     }
 
@@ -510,8 +515,10 @@ export class WhatsappService implements OnModuleInit {
           platform: info.platform,
         },
         queueSize: this.messageQueue.length,
-        messagesSentThisHour: this.messageSentCount,
-        messagesSentToday: this.dailyMessageCount,
+        messagesSentThisHour: stats.messagesSentThisHour,
+        messagesSentToday: stats.messagesSentToday,
+        hourlyLimit: stats.hourlyLimit,
+        dailyLimit: stats.dailyLimit,
         isAuthenticating: false,
         hasQrCode: false,
       };
